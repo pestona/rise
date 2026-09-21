@@ -324,17 +324,6 @@ async function checkAllSettings(interaction) {
     warnings.push('Некоторые роли персонала удалены или недоступны');
   }
 
-  const ticketLog = await channel(settings.ticketLogChannelId);
-  if (
-    ticketLog?.isTextBased() &&
-    ticketLog.type !== ChannelType.GuildForum &&
-    canWrite(ticketLog)
-  ) {
-    ok.push('Канал логов заявок');
-  } else {
-    warnings.push('Канал логов заявок не настроен или недоступен');
-  }
-
   for (const key of ['vzp', 'rp']) {
     const type = settings.types[key];
     if (!type.enabled) continue;
@@ -342,6 +331,7 @@ async function checkAllSettings(interaction) {
     const review = await channel(type.reviewChannelId);
     const category = await channel(type.acceptedChannelId);
     const forum = await channel(type.resultForumId);
+    const ticketLog = await channel(type.logChannelId);
     const resultRole = await role(type.roleId);
     const issues = [];
 
@@ -359,6 +349,13 @@ async function checkAllSettings(interaction) {
       !canWrite(forum, [PermissionFlagsBits.CreatePublicThreads])
     ) {
       issues.push('форум архива');
+    }
+    if (
+      !ticketLog?.isTextBased() ||
+      ticketLog.type === ChannelType.GuildForum ||
+      !canWrite(ticketLog)
+    ) {
+      issues.push('канал логов');
     }
     if (!resultRole || !resultRole.editable) issues.push('выдаваемая роль');
     if (!type.questions?.length || type.questions.length > 5) issues.push('вопросы (нужно 1–5)');
@@ -1170,8 +1167,11 @@ async function handleAdminSelect(interaction) {
   }
 
   if (action === 'logchannel') {
+    if (!isType(typeKey)) {
+      return interaction.reply({ content: 'Неизвестный тип заявок.', flags: MessageFlags.Ephemeral });
+    }
     store.updateGuild(interaction.guildId, (guild) => {
-      guild.ticketLogChannelId = interaction.values[0] || null;
+      guild.types[typeKey].logChannelId = interaction.values[0] || null;
     });
     return showAdmin(interaction, 'ticket');
   }

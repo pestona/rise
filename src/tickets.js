@@ -127,11 +127,11 @@ function ticketName(app, type) {
 }
 
 async function sendTicketLog(interaction, app, settings, decision, options = {}) {
-  if (!settings.ticketLogChannelId) return;
-  const channel = await interaction.guild.channels.fetch(settings.ticketLogChannelId).catch(() => null);
+  const type = settings.types[app.type];
+  if (!type?.logChannelId) return;
+  const channel = await interaction.guild.channels.fetch(type.logChannelId).catch(() => null);
   if (!channel?.isTextBased() || channel.type === ChannelType.GuildForum) return;
 
-  const type = settings.types[app.type];
   const action = decision === 'accepted' ? 'принял заявку' : 'отказал в заявке';
   const lines = [
     `<@${options.actorId}> **${action}** <@${app.userId}> типа **${type?.label || app.type.toUpperCase()}**.`,

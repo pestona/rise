@@ -236,7 +236,8 @@ function buildSummary(guild) {
     return (
       `**${type.label}** — ${statusLabel(type.enabled)}\n` +
       `Проверка: ${channelMention(type.reviewChannelId)} · Обзвон: ${channelMention(type.acceptedChannelId)}\n` +
-      `Архив: ${channelMention(type.resultForumId)} · Роль: ${roleMention(type.roleId)} · ` +
+      `Архив: ${channelMention(type.resultForumId)} · Логи: ${channelMention(type.logChannelId)} · ` +
+      `Роль: ${roleMention(type.roleId)} · ` +
       `Вопросов: ${type.questions?.length || 0}`
     );
   };
@@ -246,7 +247,7 @@ function buildSummary(guild) {
     `**Админ-панель:** ${channelMention(guild.adminPanel?.channelId)}\n\n` +
     `### Панели\n${published}\n\n` +
     `### Тикеты\n` +
-    `Персонал: ${roleMentions(guild.staffRoleIds)} · Логи заявок: ${channelMention(guild.ticketLogChannelId)}\n` +
+    `Персонал: ${roleMentions(guild.staffRoleIds)}\n` +
     `${typeSummary('vzp')}\n${typeSummary('rp')}\n\n` +
     `### Общие логи\n` +
     `Выходы: ${channelMention(guild.logs?.leaveChannelId)}\n` +
@@ -990,7 +991,8 @@ function buildTicketTab(guild) {
         `Отдел настроек заявок: оформление, набор, роли, каналы и вопросы.\n\n` +
           `GIF: ${guild.bannerUrl ? 'установлен' : 'не задан'}\n` +
           `Персонал: ${roleMentions(guild.staffRoleIds)}\n` +
-          `Логи: ${channelMention(guild.ticketLogChannelId)}\n` +
+          `Логи ${vzp.label}: ${channelMention(vzp.logChannelId)} · ` +
+          `логи ${rp.label}: ${channelMention(rp.logChannelId)}\n` +
           `Повтор после отказа: **${guild.cooldownDays}** дн.\n\n` +
           `**${vzp.label}:** ${statusLabel(vzp.enabled)} · проверка ${channelMention(vzp.reviewChannelId)} · обзвон ${channelMention(vzp.acceptedChannelId)} · форум ${channelMention(vzp.resultForumId)} · роль ${roleMention(vzp.roleId)}\n` +
           `**${rp.label}:** ${statusLabel(rp.enabled)} · проверка ${channelMention(rp.reviewChannelId)} · обзвон ${channelMention(rp.acceptedChannelId)} · форум ${channelMention(rp.resultForumId)} · роль ${roleMention(rp.roleId)}`,
@@ -1033,12 +1035,23 @@ function buildTicketTab(guild) {
           .setMaxValues(25),
       ),
     )
-    .addTextDisplayComponents((text) => text.setContent('**Канал логов заявок**'))
+    .addTextDisplayComponents((text) => text.setContent(`**Канал логов заявок ${vzp.label}**`))
     .addActionRowComponents((row) =>
       row.setComponents(
         new ChannelSelectMenuBuilder()
-          .setCustomId('admin:logchannel')
-          .setPlaceholder('Выберите канал логов')
+          .setCustomId('admin:logchannel:vzp')
+          .setPlaceholder(`Логи заявок ${vzp.label}`)
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent(`**Канал логов заявок ${rp.label}**`))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:logchannel:rp')
+          .setPlaceholder(`Логи заявок ${rp.label}`)
           .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
           .setMinValues(0)
           .setMaxValues(1),

@@ -30,6 +30,7 @@ function defaultType(key) {
     reviewChannelId: null,
     acceptedChannelId: null,
     resultForumId: null,
+    logChannelId: null,
     roleId: null,
     questions: DEFAULT_QUESTIONS[key].map((q) => ({ ...q })),
   };
@@ -49,7 +50,6 @@ function defaultGuild() {
       '> В случае отказа можете подать заявку повторно через {cooldown} дн.',
     cooldownDays: 7,
     staffRoleIds: [],
-    ticketLogChannelId: null,
     logs: {
       leaveChannelId: null,
       moderationChannelId: null,
@@ -217,6 +217,14 @@ function getGuild(guildId) {
         db.settings.guilds[guildId].staffRoleIds.push(oldRoleId);
       }
       delete db.settings.guilds[guildId].staffRoleId;
+      dirty = true;
+    }
+    if (Object.hasOwn(db.settings.guilds[guildId], 'ticketLogChannelId')) {
+      const oldLogChannelId = db.settings.guilds[guildId].ticketLogChannelId;
+      for (const type of Object.values(db.settings.guilds[guildId].types)) {
+        if (!type.logChannelId) type.logChannelId = oldLogChannelId;
+      }
+      delete db.settings.guilds[guildId].ticketLogChannelId;
       dirty = true;
     }
     for (const vehicle of db.settings.guilds[guildId].autopark?.vehicles || []) {

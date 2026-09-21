@@ -169,8 +169,8 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
       type.reviewChannelId = mapChannel(type.reviewChannelId);
       type.acceptedChannelId = mapChannel(type.acceptedChannelId);
       type.resultForumId = mapChannel(type.resultForumId);
+      type.logChannelId = mapChannel(type.logChannelId);
     }
-    settings.ticketLogChannelId = mapChannel(settings.ticketLogChannelId);
     settings.logs.leaveChannelId = mapChannel(settings.logs.leaveChannelId);
     settings.logs.moderationChannelId = mapChannel(settings.logs.moderationChannelId);
     settings.security.logChannelId = mapChannel(settings.security.logChannelId);
