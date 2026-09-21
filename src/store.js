@@ -276,6 +276,20 @@ function getGuild(guildId) {
         dirty = true;
       }
       if (gatherings.active) {
+        if (!Array.isArray(gatherings.active.pingRoleIds)) {
+          gatherings.active.pingRoleIds = gatherings.active.pingRoleId
+            ? [gatherings.active.pingRoleId]
+            : [];
+          dirty = true;
+        }
+        if (Object.hasOwn(gatherings.active, 'pingRoleId')) {
+          delete gatherings.active.pingRoleId;
+          dirty = true;
+        }
+        if (typeof gatherings.active.pingEveryone !== 'boolean') {
+          gatherings.active.pingEveryone = false;
+          dirty = true;
+        }
         if (!Array.isArray(gatherings.active.main)) {
           gatherings.active.main = [];
           dirty = true;

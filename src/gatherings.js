@@ -400,7 +400,17 @@ async function handleGatheringCommand(interaction) {
   const time = interaction.options.getString('время', true).trim();
   const content = interaction.options.getString('контент', true).trim();
   const maxMain = interaction.options.getInteger('участников', true);
-  const pingRole = interaction.options.getRole('роль', true);
+  const pingRoleIds = [
+    interaction.options.getRole('роль'),
+    interaction.options.getRole('роль_2'),
+    interaction.options.getRole('роль_3'),
+    interaction.options.getRole('роль_4'),
+    interaction.options.getRole('роль_5'),
+  ]
+    .filter(Boolean)
+    .map((role) => role.id)
+    .filter((roleId, index, values) => values.indexOf(roleId) === index);
+  const pingEveryone = interaction.options.getBoolean('everyone') === true;
   const parsed = parseGatheringTime(time);
 
   if (!parsed.ok) {
@@ -412,6 +422,12 @@ async function handleGatheringCommand(interaction) {
   if (!content) {
     return interaction.reply({
       content: 'Укажите контент.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  if (!pingRoleIds.length && !pingEveryone) {
+    return interaction.reply({
+      content: 'Выберите хотя бы одну роль или включите `everyone`.',
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -440,7 +456,8 @@ async function handleGatheringCommand(interaction) {
     startedAt: Date.now(),
     channelId: channel.id,
     messageId: null,
-    pingRoleId: pingRole.id,
+    pingRoleIds,
+    pingEveryone,
     main: [],
     bench: [],
   };
@@ -450,10 +467,17 @@ async function handleGatheringCommand(interaction) {
   });
 
   const payload = listPayload(store.getGuild(interaction.guildId));
+  const mentions = [
+    pingEveryone ? '@everyone' : null,
+    ...pingRoleIds.map((roleId) => `<@&${roleId}>`),
+  ].filter(Boolean);
   const message = await channel.send({
-    content: `<@&${pingRole.id}>`,
+    content: mentions.join(' '),
     ...payload,
-    allowedMentions: { roles: [pingRole.id] },
+    allowedMentions: {
+      parse: pingEveryone ? ['everyone'] : [],
+      roles: pingRoleIds,
+    },
   });
 
   store.updateGuild(interaction.guildId, (guild) => {

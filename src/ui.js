@@ -241,6 +241,15 @@ function buildSummary(guild) {
       `Вопросов: ${type.questions?.length || 0}`
     );
   };
+  const activeGathering = guild.gatherings?.active;
+  const gatheringPings = activeGathering
+    ? [
+        activeGathering.pingEveryone ? '@everyone' : null,
+        ...(activeGathering.pingRoleIds || []).map((id) => roleMention(id)),
+      ]
+        .filter(Boolean)
+        .join(' ') || 'без пинга'
+    : 'нет активного сбора';
 
   const content =
     `## Сводка привязок\n` +
@@ -257,8 +266,8 @@ function buildSummary(guild) {
     `Общее время аренды: **${guild.autopark?.durationMinutes || 60} мин.** · Машин: **${vehicles.length}**\n` +
     `${vehicleBindings}\n\n` +
     `### Сборы\n` +
-    `Роль активного сбора: ${roleMention(guild.gatherings?.active?.pingRoleId)}\n` +
-    `Активный: **${guild.gatherings?.active ? `${guild.gatherings.active.content || guild.gatherings.active.title}` : 'нет'}**`;
+    `Пинг активного сбора: ${gatheringPings}\n` +
+    `Активный: **${activeGathering ? `${activeGathering.content || activeGathering.title}` : 'нет'}**`;
 
   return new ContainerBuilder()
     .setAccentColor(0x5865f2)

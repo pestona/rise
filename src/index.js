@@ -80,8 +80,26 @@ const commands = [
     .addRoleOption((option) =>
       option
         .setName('роль')
-        .setDescription('Какую роль упомянуть при запуске сбора')
-        .setRequired(true),
+        .setDescription('Первая роль для упоминания')
+        .setRequired(false),
+    )
+    .addRoleOption((option) =>
+      option.setName('роль_2').setDescription('Вторая роль для упоминания').setRequired(false),
+    )
+    .addRoleOption((option) =>
+      option.setName('роль_3').setDescription('Третья роль для упоминания').setRequired(false),
+    )
+    .addRoleOption((option) =>
+      option.setName('роль_4').setDescription('Четвёртая роль для упоминания').setRequired(false),
+    )
+    .addRoleOption((option) =>
+      option.setName('роль_5').setDescription('Пятая роль для упоминания').setRequired(false),
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName('everyone')
+        .setDescription('Упомянуть @everyone')
+        .setRequired(false),
     )
     .toJSON(),
 ];
