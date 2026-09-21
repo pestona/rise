@@ -173,6 +173,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
+    if (interaction.isChannelSelectMenu() && interaction.customId.startsWith('rev:voice:')) {
+      await tickets.handleReviewVoiceSelect(interaction);
+      return;
+    }
+
     if (interaction.isModalSubmit() && interaction.customId.startsWith('rev:reason:')) {
       await tickets.handleRejectModal(interaction);
       return;

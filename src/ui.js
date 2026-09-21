@@ -1199,6 +1199,10 @@ function buildApplicationContainer(
       row.setComponents(
         new ButtonBuilder().setCustomId(`rev:ok:${app.id}`).setLabel('Принять').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`rev:no:${app.id}`).setLabel('Отказать').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`rev:invite:${app.id}`)
+          .setLabel('Вызвать на обзвон')
+          .setStyle(ButtonStyle.Primary),
       ),
     );
   }

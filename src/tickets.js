@@ -5,6 +5,7 @@ const {
   TextInputStyle,
   MessageFlags,
   ChannelType,
+  ChannelSelectMenuBuilder,
   PermissionFlagsBits,
 } = require('discord.js');
 const store = require('./store');
@@ -353,6 +354,29 @@ async function handleReviewButton(interaction) {
     return interaction.reply({ content: 'Эта заявка уже рассмотрена.', flags: MessageFlags.Ephemeral });
   }
 
+  if (action === 'invite') {
+    if (app.status !== 'interview' || app.interviewChannelId !== interaction.channelId) {
+      return interaction.reply({
+        content: 'Вызвать участника можно только из его активного канала обзвона.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    return interaction.reply({
+      content: 'Выберите голосовой канал для обзвона.',
+      components: [
+        new ActionRowBuilder().setComponents(
+          new ChannelSelectMenuBuilder()
+            .setCustomId(`rev:voice:${app.id}`)
+            .setPlaceholder('Выберите голосовой канал')
+            .addChannelTypes(ChannelType.GuildVoice)
+            .setMinValues(1)
+            .setMaxValues(1),
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   if (action === 'no') {
     const modal = new ModalBuilder()
       .setCustomId(`rev:reason:${app.id}`)
@@ -389,6 +413,66 @@ async function handleReviewButton(interaction) {
 
   await interaction.deferUpdate();
   await acceptApplication(interaction, app);
+}
+
+async function handleReviewVoiceSelect(interaction) {
+  const [, action, appId] = interaction.customId.split(':');
+  if (action !== 'voice') return;
+
+  const settings = store.getGuild(interaction.guildId);
+  if (!canReview(interaction.member, settings)) {
+    return interaction.reply({
+      content: 'Вызывать на обзвон может только персонал.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const app = store.findApp(appId);
+  if (
+    !app ||
+    app.guildId !== interaction.guildId ||
+    app.status !== 'interview' ||
+    app.interviewChannelId !== interaction.channelId
+  ) {
+    return interaction.update({
+      content: 'Активный канал обзвона для этой заявки не найден.',
+      components: [],
+    });
+  }
+
+  const voiceChannelId = interaction.values[0];
+  const voiceChannel =
+    interaction.channels?.get(voiceChannelId) ||
+    (await interaction.guild.channels.fetch(voiceChannelId).catch(() => null));
+  if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+    return interaction.update({
+      content: 'Выберите обычный голосовой канал.',
+      components: [],
+    });
+  }
+
+  try {
+    await interaction.channel.send({
+      content:
+        `<@${app.userId}> был вызван на обзвон модератором ` +
+        `<@${interaction.user.id}> в канал <#${voiceChannel.id}>`,
+      allowedMentions: {
+        users: [app.userId, interaction.user.id],
+        roles: [],
+      },
+    });
+  } catch (error) {
+    console.warn('Не удалось отправить вызов на обзвон:', error.message);
+    return interaction.update({
+      content: 'Не удалось отправить вызов. Проверьте права бота в канале тикета.',
+      components: [],
+    });
+  }
+
+  return interaction.update({
+    content: `Вызов отправлен в <#${app.interviewChannelId}>.`,
+    components: [],
+  });
 }
 
 async function moveToInterview(interaction, app) {
@@ -678,5 +762,6 @@ module.exports = {
   handleApplySelect,
   handleApplyModal,
   handleReviewButton,
+  handleReviewVoiceSelect,
   handleRejectModal,
 };
