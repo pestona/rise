@@ -195,16 +195,6 @@ async function handleApplySelect(interaction) {
     return;
   }
 
-  const member = interaction.member;
-  if (type.roleId && member.roles.cache.has(type.roleId)) {
-    await interaction.reply({
-      content: `У вас уже есть роль **${type.label}**.`,
-      flags: MessageFlags.Ephemeral,
-    });
-    await resetApplyPanel(interaction);
-    return;
-  }
-
   if (store.pendingApp(interaction.guildId, interaction.user.id, typeKey)) {
     await interaction.reply({
       content: `У вас уже есть заявка **${type.label}** на рассмотрении.`,
