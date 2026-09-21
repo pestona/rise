@@ -76,6 +76,10 @@ function roleMention(id) {
   return id ? `<@&${id}>` : 'не задана';
 }
 
+function roleMentions(ids) {
+  return ids?.length ? ids.map((id) => roleMention(id)).join(' ') : 'не выбраны';
+}
+
 function questionsPreview(questions) {
   if (!questions?.length) return '_Вопросы не добавлены_';
   return questions
@@ -120,7 +124,7 @@ function buildAdminHub(guild, botName) {
   const name = botName || 'RISE';
   const panelReady = Boolean(guild.panel?.channelId);
   const ticketReady = Boolean(
-    guild.types?.vzp?.enabled || guild.types?.rp?.enabled || guild.staffRoleId,
+    guild.types?.vzp?.enabled || guild.types?.rp?.enabled || guild.staffRoleIds?.length,
   );
   const logsReady = Boolean(guild.logs?.leaveChannelId || guild.logs?.moderationChannelId);
   const autoparkReady = Boolean(guild.autopark?.vehicles?.length);
@@ -242,7 +246,7 @@ function buildSummary(guild) {
     `**Админ-панель:** ${channelMention(guild.adminPanel?.channelId)}\n\n` +
     `### Панели\n${published}\n\n` +
     `### Тикеты\n` +
-    `Персонал: ${roleMention(guild.staffRoleId)} · Логи заявок: ${channelMention(guild.ticketLogChannelId)}\n` +
+    `Персонал: ${roleMentions(guild.staffRoleIds)} · Логи заявок: ${channelMention(guild.ticketLogChannelId)}\n` +
     `${typeSummary('vzp')}\n${typeSummary('rp')}\n\n` +
     `### Общие логи\n` +
     `Выходы: ${channelMention(guild.logs?.leaveChannelId)}\n` +
@@ -985,7 +989,7 @@ function buildTicketTab(guild) {
       text.setContent(
         `Отдел настроек заявок: оформление, набор, роли, каналы и вопросы.\n\n` +
           `GIF: ${guild.bannerUrl ? 'установлен' : 'не задан'}\n` +
-          `Персонал: ${roleMention(guild.staffRoleId)}\n` +
+          `Персонал: ${roleMentions(guild.staffRoleIds)}\n` +
           `Логи: ${channelMention(guild.ticketLogChannelId)}\n` +
           `Повтор после отказа: **${guild.cooldownDays}** дн.\n\n` +
           `**${vzp.label}:** ${statusLabel(vzp.enabled)} · проверка ${channelMention(vzp.reviewChannelId)} · обзвон ${channelMention(vzp.acceptedChannelId)} · форум ${channelMention(vzp.resultForumId)} · роль ${roleMention(vzp.roleId)}\n` +
@@ -1019,14 +1023,14 @@ function buildTicketTab(guild) {
         new ButtonBuilder().setCustomId('admin:page:rp').setLabel(`Настроить ${rp.label}`).setStyle(ButtonStyle.Primary),
       ),
     )
-    .addTextDisplayComponents((text) => text.setContent('**Роль персонала** (кто принимает и отклоняет заявки)'))
+    .addTextDisplayComponents((text) => text.setContent('**Роли персонала** (кто принимает и отклоняет заявки)'))
     .addActionRowComponents((row) =>
       row.setComponents(
         new RoleSelectMenuBuilder()
           .setCustomId('admin:staff')
-          .setPlaceholder('Выберите роль персонала')
+          .setPlaceholder('Выберите одну или несколько ролей')
           .setMinValues(0)
-          .setMaxValues(1),
+          .setMaxValues(25),
       ),
     )
     .addTextDisplayComponents((text) => text.setContent('**Канал логов заявок**'))

@@ -48,7 +48,7 @@ function defaultGuild() {
       'Каждое открытие набора сопровождается тегами в этом канале.\n\n' +
       '> В случае отказа можете подать заявку повторно через {cooldown} дн.',
     cooldownDays: 7,
-    staffRoleId: null,
+    staffRoleIds: [],
     ticketLogChannelId: null,
     logs: {
       leaveChannelId: null,
@@ -209,6 +209,14 @@ function getGuild(guildId) {
     }
     if (!Array.isArray(db.settings.guilds[guildId].panels)) {
       db.settings.guilds[guildId].panels = [];
+      dirty = true;
+    }
+    if (Object.hasOwn(db.settings.guilds[guildId], 'staffRoleId')) {
+      const oldRoleId = db.settings.guilds[guildId].staffRoleId;
+      if (oldRoleId && !db.settings.guilds[guildId].staffRoleIds.includes(oldRoleId)) {
+        db.settings.guilds[guildId].staffRoleIds.push(oldRoleId);
+      }
+      delete db.settings.guilds[guildId].staffRoleId;
       dirty = true;
     }
     for (const vehicle of db.settings.guilds[guildId].autopark?.vehicles || []) {

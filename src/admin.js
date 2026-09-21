@@ -316,9 +316,13 @@ async function checkAllSettings(interaction) {
     ok.push('Основные права бота');
   }
 
-  const staffRole = await role(settings.staffRoleId);
-  if (staffRole) ok.push('Роль персонала');
-  else warnings.push('Роль персонала не выбрана или удалена');
+  const staffRoles = await Promise.all((settings.staffRoleIds || []).map(role));
+  const validStaffRoles = staffRoles.filter(Boolean);
+  if (validStaffRoles.length) ok.push(`Роли персонала (${validStaffRoles.length})`);
+  else warnings.push('Роли персонала не выбраны или удалены');
+  if (validStaffRoles.length !== staffRoles.length) {
+    warnings.push('Некоторые роли персонала удалены или недоступны');
+  }
 
   const ticketLog = await channel(settings.ticketLogChannelId);
   if (
@@ -1160,7 +1164,7 @@ async function handleAdminSelect(interaction) {
 
   if (action === 'staff') {
     store.updateGuild(interaction.guildId, (guild) => {
-      guild.staffRoleId = interaction.values[0] || null;
+      guild.staffRoleIds = [...interaction.values];
     });
     return showAdmin(interaction, 'ticket');
   }

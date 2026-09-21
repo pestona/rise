@@ -284,7 +284,10 @@ async function handleApplyModal(interaction) {
   };
 
   const settingsForSend = settings;
-  const staffPing = settingsForSend.staffRoleId ? `<@&${settingsForSend.staffRoleId}> новая заявка` : '';
+  const staffRoleIds = settingsForSend.staffRoleIds || [];
+  const staffPing = staffRoleIds.length
+    ? `${staffRoleIds.map((roleId) => `<@&${roleId}>`).join(' ')} новая заявка`
+    : '';
 
   let sent;
   try {
@@ -297,7 +300,7 @@ async function handleApplyModal(interaction) {
       flags: v2Flags(false),
       allowedMentions: {
         users: [],
-        roles: settingsForSend.staffRoleId ? [settingsForSend.staffRoleId] : [],
+        roles: staffRoleIds,
       },
     });
   } catch (error) {
@@ -561,9 +564,9 @@ async function createInterviewChannel(interaction, app, type, settings, member) 
     });
   }
 
-  if (settings.staffRoleId) {
+  for (const staffRoleId of settings.staffRoleIds || []) {
     overwrites.push({
-      id: settings.staffRoleId,
+      id: staffRoleId,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,

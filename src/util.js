@@ -26,7 +26,7 @@ function parseUserIds(text) {
 
 function canReview(member, settings) {
   if (isAdmin(member)) return true;
-  if (settings.staffRoleId && member.roles.cache.has(settings.staffRoleId)) return true;
+  if ((settings.staffRoleIds || []).some((roleId) => member.roles.cache.has(roleId))) return true;
   return false;
 }
 
