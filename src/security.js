@@ -175,10 +175,12 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
     settings.logs.moderationChannelId = mapChannel(settings.logs.moderationChannelId);
     settings.security.logChannelId = mapChannel(settings.security.logChannelId);
     if (settings.gatherings) {
-      settings.gatherings.pingRoleId = mapRole(settings.gatherings.pingRoleId);
       settings.gatherings.listChannelId = mapChannel(settings.gatherings.listChannelId);
       if (settings.gatherings.active?.channelId) {
         settings.gatherings.active.channelId = mapChannel(settings.gatherings.active.channelId);
+      }
+      if (settings.gatherings.active?.pingRoleId) {
+        settings.gatherings.active.pingRoleId = mapRole(settings.gatherings.active.pingRoleId);
       }
     }
     settings.panels = settings.panels.filter((panel) => !recreatedChannelIds.has(panel.channelId));

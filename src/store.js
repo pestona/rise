@@ -66,7 +66,6 @@ function defaultGuild() {
       claims: {},
     },
     gatherings: {
-      pingRoleId: null,
       listChannelId: null,
       selectedPresetId: 'mp',
       presets: [
@@ -268,6 +267,10 @@ function getGuild(guildId) {
       dirty = true;
     } else {
       const gatherings = db.settings.guilds[guildId].gatherings;
+      if (Object.hasOwn(gatherings, 'pingRoleId')) {
+        delete gatherings.pingRoleId;
+        dirty = true;
+      }
       if (!Array.isArray(gatherings.presets) || !gatherings.presets.length) {
         gatherings.presets = defaultGuild().gatherings.presets;
         dirty = true;

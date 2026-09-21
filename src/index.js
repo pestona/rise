@@ -77,6 +77,12 @@ const commands = [
         .setMinValue(1)
         .setMaxValue(50),
     )
+    .addRoleOption((option) =>
+      option
+        .setName('роль')
+        .setDescription('Какую роль упомянуть при запуске сбора')
+        .setRequired(true),
+    )
     .toJSON(),
 ];
 

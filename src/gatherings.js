@@ -400,6 +400,7 @@ async function handleGatheringCommand(interaction) {
   const time = interaction.options.getString('время', true).trim();
   const content = interaction.options.getString('контент', true).trim();
   const maxMain = interaction.options.getInteger('участников', true);
+  const pingRole = interaction.options.getRole('роль', true);
   const parsed = parseGatheringTime(time);
 
   if (!parsed.ok) {
@@ -439,6 +440,7 @@ async function handleGatheringCommand(interaction) {
     startedAt: Date.now(),
     channelId: channel.id,
     messageId: null,
+    pingRoleId: pingRole.id,
     main: [],
     bench: [],
   };
@@ -447,12 +449,11 @@ async function handleGatheringCommand(interaction) {
     guild.gatherings.active = gathering;
   });
 
-  const pingRoleId = settings.gatherings.pingRoleId;
   const payload = listPayload(store.getGuild(interaction.guildId));
   const message = await channel.send({
-    content: pingRoleId ? `<@&${pingRoleId}>` : undefined,
+    content: `<@&${pingRole.id}>`,
     ...payload,
-    allowedMentions: pingRoleId ? { roles: [pingRoleId] } : { parse: [] },
+    allowedMentions: { roles: [pingRole.id] },
   });
 
   store.updateGuild(interaction.guildId, (guild) => {

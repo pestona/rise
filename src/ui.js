@@ -128,7 +128,7 @@ function buildAdminHub(guild, botName) {
   );
   const logsReady = Boolean(guild.logs?.leaveChannelId || guild.logs?.moderationChannelId);
   const autoparkReady = Boolean(guild.autopark?.vehicles?.length);
-  const gatheringsReady = Boolean(guild.gatherings?.pingRoleId || guild.gatherings?.active);
+  const gatheringsReady = true;
   const securityReady = Boolean(guild.security?.enabled && guild.security?.logChannelId);
 
   const container = new ContainerBuilder().setAccentColor(0x2b2d31);
@@ -257,7 +257,7 @@ function buildSummary(guild) {
     `Общее время аренды: **${guild.autopark?.durationMinutes || 60} мин.** · Машин: **${vehicles.length}**\n` +
     `${vehicleBindings}\n\n` +
     `### Сборы\n` +
-    `Пинг: ${roleMention(guild.gatherings?.pingRoleId)}\n` +
+    `Роль активного сбора: ${roleMention(guild.gatherings?.active?.pingRoleId)}\n` +
     `Активный: **${guild.gatherings?.active ? `${guild.gatherings.active.content || guild.gatherings.active.title}` : 'нет'}**`;
 
   return new ContainerBuilder()
@@ -732,8 +732,8 @@ function buildGatheringsTab(guild) {
     .addTextDisplayComponents((text) =>
       text.setContent(
         `## Настройка сборов\n` +
-          `Запуск: **\`/сбор\`** в нужном канале.\n\n` +
-          `Пинг: ${roleMention(gatherings.pingRoleId)}\n` +
+          `Запуск: **\`/сбор\`** в нужном канале.\n` +
+          `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}`,
       ),
     )
@@ -745,16 +745,6 @@ function buildGatheringsTab(guild) {
           .setStyle(ButtonStyle.Danger)
           .setDisabled(!active),
         backToHubButton(),
-      ),
-    )
-    .addTextDisplayComponents((text) => text.setContent('**Кого пинговать при запуске**'))
-    .addActionRowComponents((row) =>
-      row.setComponents(
-        new RoleSelectMenuBuilder()
-          .setCustomId('admin:gathping')
-          .setPlaceholder('Роль для пинга')
-          .setMinValues(0)
-          .setMaxValues(1),
       ),
     );
 

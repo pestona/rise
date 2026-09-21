@@ -403,12 +403,6 @@ async function checkAllSettings(interaction) {
     warnings.push('В автопарке нет машин');
   }
 
-  if (settings.gatherings?.pingRoleId) {
-    ok.push('Сборы: роль пинга задана');
-  } else {
-    warnings.push('Для сборов не выбрана роль пинга');
-  }
-
   let validPanels = 0;
   const deadPanels = [];
   for (const panel of settings.panels || []) {
@@ -1179,13 +1173,6 @@ async function handleAdminSelect(interaction) {
   if (action === 'gathpick') {
     store.updateGuild(interaction.guildId, (guild) => {
       guild.gatherings.selectedPresetId = interaction.values[0] || null;
-    });
-    return showAdmin(interaction, 'gatherings');
-  }
-
-  if (action === 'gathping') {
-    store.updateGuild(interaction.guildId, (guild) => {
-      guild.gatherings.pingRoleId = interaction.values[0] || null;
     });
     return showAdmin(interaction, 'gatherings');
   }
