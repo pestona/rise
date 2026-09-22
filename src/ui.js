@@ -13,7 +13,7 @@ const {
   StringSelectMenuOptionBuilder,
   UserSelectMenuBuilder,
 } = require('discord.js');
-const { fillPlaceholders, statusLabel, truncate } = require('./util');
+const { ACCESS_ACTIONS, fillPlaceholders, statusLabel, truncate } = require('./util');
 
 function v2Flags(ephemeral = false) {
   return ephemeral ? MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral : MessageFlags.IsComponentsV2;
@@ -200,6 +200,15 @@ function buildAdminHub(guild, botName) {
           .setLabel('Активность')
           .setEmoji('📈')
           .setStyle(ButtonStyle.Primary),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:tab:access')
+          .setLabel('Доступ')
+          .setEmoji('🔐')
+          .setStyle(ButtonStyle.Secondary),
       ),
     );
 
@@ -898,6 +907,55 @@ function buildActivityUserTab(userId, periods) {
     );
 }
 
+function buildAccessTab(guild) {
+  const access = guild.access || {};
+  const roles = access.roles || {};
+  const selected = Object.hasOwn(ACCESS_ACTIONS, access.selectedAction)
+    ? access.selectedAction
+    : Object.keys(ACCESS_ACTIONS)[0];
+  const summary = Object.entries(ACCESS_ACTIONS)
+    .map(([key, label]) => `**${label}:** ${roleMentions(roles[key])}`)
+    .join('\n');
+
+  return new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Доступ по ролям\n` +
+          `Администраторы сервера всегда имеют полный доступ.\n\n${summary}`,
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Какое действие настроить**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('admin:accessaction')
+          .setPlaceholder('Выберите действие')
+          .addOptions(
+            Object.entries(ACCESS_ACTIONS).map(([key, label]) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(label)
+                .setValue(key)
+                .setDefault(key === selected),
+            ),
+          ),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent(`**Роли для действия «${ACCESS_ACTIONS[selected]}»**`),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:accessroles')
+          .setPlaceholder('Выберите разрешённые роли')
+          .setMinValues(0)
+          .setMaxValues(25),
+      ),
+    )
+    .addActionRowComponents((row) => row.setComponents(backToHubButton()));
+}
+
 function buildAutoparkTab(guild) {
   const vehicles = guild.autopark?.vehicles || [];
   const selected =
@@ -1224,6 +1282,7 @@ module.exports = {
   buildGatheringsTab,
   buildActivityTab,
   buildActivityUserTab,
+  buildAccessTab,
   buildSecurityTab,
   buildTicketTab,
   buildTypePage,

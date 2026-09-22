@@ -174,6 +174,11 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
     settings.logs.leaveChannelId = mapChannel(settings.logs.leaveChannelId);
     settings.logs.moderationChannelId = mapChannel(settings.logs.moderationChannelId);
     settings.security.logChannelId = mapChannel(settings.security.logChannelId);
+    if (settings.access?.roles) {
+      for (const key of Object.keys(settings.access.roles)) {
+        settings.access.roles[key] = settings.access.roles[key].map(mapRole);
+      }
+    }
     if (settings.gatherings) {
       settings.gatherings.listChannelId = mapChannel(settings.gatherings.listChannelId);
       if (settings.gatherings.active?.channelId) {

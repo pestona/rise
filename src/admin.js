@@ -14,9 +14,11 @@ const {
 } = require('discord.js');
 const store = require('./store');
 const {
+  ACCESS_ACTIONS,
   isAdmin,
   isBotAdminId,
   isType,
+  hasAccess,
   isHttpUrl,
   parseBool,
   parseStyle,
@@ -36,6 +38,7 @@ const {
   buildGatheringsTab,
   buildActivityTab,
   buildActivityUserTab,
+  buildAccessTab,
   buildSecurityTab,
   buildTicketTab,
   buildTypePage,
@@ -50,7 +53,7 @@ const { getActivityStats } = require('./activity');
 function deny(interaction) {
   return interaction.reply(
     hidden({
-      content: 'Админ-панель доступна только администрации сервера.',
+      content: 'У вас нет доступа к этому разделу.',
     }),
   );
 }
@@ -69,11 +72,15 @@ function isSecurityManager(interaction) {
 }
 
 function isSecurityOnlyUser(interaction) {
-  return !isAdmin(interaction.member) && isSecurityManager(interaction);
+  const settings = store.getGuild(interaction.guildId);
+  return (
+    !hasAccess(interaction.member, settings, 'settingsManage') &&
+    isSecurityManager(interaction)
+  );
 }
 
 function ensureAdmin(interaction) {
-  if (!isAdmin(interaction.member)) {
+  if (!hasAccess(interaction.member, store.getGuild(interaction.guildId), 'settingsManage')) {
     deny(interaction);
     return false;
   }
@@ -81,7 +88,14 @@ function ensureAdmin(interaction) {
 }
 
 function ensurePanelAccess(interaction) {
-  if (isAdmin(interaction.member) || isSecurityManager(interaction)) return true;
+  const settings = store.getGuild(interaction.guildId);
+  if (
+    hasAccess(interaction.member, settings, 'settingsManage') ||
+    hasAccess(interaction.member, settings, 'panelsPublish') ||
+    isSecurityManager(interaction)
+  ) {
+    return true;
+  }
   deny(interaction);
   return false;
 }
@@ -173,6 +187,7 @@ function adminPayload(interaction, page) {
   else if (page === 'logs') container = buildLogsTab(guild);
   else if (page === 'autopark') container = buildAutoparkTab(guild);
   else if (page === 'gatherings') container = buildGatheringsTab(guild);
+  else if (page === 'access') container = buildAccessTab(guild);
   else if (page.startsWith('activity')) {
     const period = page.split(':')[1] || 'week';
     container = buildActivityTab(getActivityStats(interaction.guildId, period), period);
@@ -262,6 +277,15 @@ async function handlePanelCommand(interaction) {
   }
 
   const guild = store.getGuild(interaction.guildId);
+  if (
+    !hasAccess(interaction.member, guild, 'settingsManage') &&
+    hasAccess(interaction.member, guild, 'panelsPublish')
+  ) {
+    return interaction.reply({
+      ...adminPayload(interaction, 'panels'),
+      flags: v2Flags(true),
+    });
+  }
   if (guild.adminPanel?.channelId && guild.adminPanel?.messageId) {
     try {
       const channel = await interaction.client.channels.fetch(guild.adminPanel.channelId);
@@ -792,11 +816,22 @@ async function handleAdminButton(interaction) {
   const securityOnly = isSecurityOnlyUser(interaction);
   const securityAction = action === 'security' || action === 'securityrestore';
   const securityTab = action === 'tab' && arg === 'security';
+  const settings = store.getGuild(interaction.guildId);
+  const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
+  const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
 
   if (securityOnly) {
     if (!securityAction && !securityTab) return denySecurityOnly(interaction);
-  } else if (!ensureAdmin(interaction)) {
-    return;
+  } else if (action === 'tab' && arg === 'access') {
+    if (!isAdmin(interaction.member)) return deny(interaction);
+  } else if (!settingsAccess) {
+    if (publishAccess && action === 'tab' && arg === 'panels') {
+      return showAdmin(interaction, 'panels');
+    }
+    if (publishAccess && (action === 'hub' || action === 'home')) {
+      return showAdmin(interaction, 'panels');
+    }
+    return deny(interaction);
   }
 
   if (action === 'check') return checkAllSettings(interaction);
@@ -808,6 +843,7 @@ async function handleAdminButton(interaction) {
   if (action === 'tab' && arg === 'summary') return showAdmin(interaction, 'summary');
   if (action === 'tab' && arg === 'gatherings') return showAdmin(interaction, 'gatherings');
   if (action === 'tab' && arg === 'activity') return showAdmin(interaction, 'activity:week');
+  if (action === 'tab' && arg === 'access') return showAdmin(interaction, 'access');
   if (action === 'tab' && arg === 'security') return showAdmin(interaction, 'security');
   if (action === 'activity' && ['day', 'week', 'month', 'all'].includes(arg)) {
     return showAdmin(interaction, `activity:${arg}`);
@@ -1061,7 +1097,37 @@ async function handleAdminSelect(interaction) {
   const securityOnly = isSecurityOnlyUser(interaction);
 
   if (securityOnly && action !== 'security') return denySecurityOnly(interaction);
-  if (!securityOnly && !ensureAdmin(interaction)) return;
+  if (action === 'accessaction' || action === 'accessroles') {
+    if (!isAdmin(interaction.member)) return deny(interaction);
+  } else if (!securityOnly) {
+    const settings = store.getGuild(interaction.guildId);
+    const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
+    const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
+    if (!settingsAccess && !(publishAccess && ['pickpanel', 'sendpanel'].includes(action))) {
+      return deny(interaction);
+    }
+  }
+
+  if (action === 'accessaction') {
+    const selectedAction = interaction.values[0];
+    if (!Object.hasOwn(ACCESS_ACTIONS, selectedAction)) {
+      return interaction.reply({ content: 'Неизвестное действие.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.access.selectedAction = selectedAction;
+    });
+    return showAdmin(interaction, 'access');
+  }
+
+  if (action === 'accessroles') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      const selectedAction = guild.access.selectedAction;
+      if (Object.hasOwn(ACCESS_ACTIONS, selectedAction)) {
+        guild.access.roles[selectedAction] = [...interaction.values];
+      }
+    });
+    return showAdmin(interaction, 'access');
+  }
 
   if (action === 'activityuser') {
     const userId = interaction.values[0];

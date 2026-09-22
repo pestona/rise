@@ -10,7 +10,7 @@ const {
 } = require('discord.js');
 const store = require('./store');
 const { buildGatheringList, buildGatheringPanel } = require('./ui');
-const { canReview, shortId, truncate } = require('./util');
+const { hasAccess, shortId, truncate } = require('./util');
 const { recordGathering } = require('./activity');
 
 const MAX_ROSTER = 50;
@@ -30,7 +30,7 @@ function listPayload(settings, closed = false) {
 }
 
 function canManage(member, settings) {
-  return canReview(member, settings);
+  return hasAccess(member, settings, 'gatheringModerate');
 }
 
 function getActive(guildId) {
@@ -395,7 +395,12 @@ async function afterRosterChange(interaction) {
 
 async function handleGatheringCommand(interaction) {
   const settings = store.getGuild(interaction.guildId);
-  if (!canManage(interaction.member, settings)) return denyManage(interaction);
+  if (!hasAccess(interaction.member, settings, 'gatheringCreate')) {
+    return interaction.reply({
+      content: 'У вас нет доступа к команде `/сбор`.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 
   const time = interaction.options.getString('время', true).trim();
   const content = interaction.options.getString('контент', true).trim();

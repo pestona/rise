@@ -86,6 +86,18 @@ function defaultGuild() {
       windowSeconds: 10,
       lastBackupAt: null,
     },
+    access: {
+      selectedAction: 'gatheringCreate',
+      roles: {
+        gatheringCreate: [],
+        positionsCreate: [],
+        applicationReview: [],
+        gatheringModerate: [],
+        positionModerate: [],
+        panelsPublish: [],
+        settingsManage: [],
+      },
+    },
     panel: { channelId: null, messageId: null },
     adminPanel: { channelId: null, messageId: null },
     publishPanelKey: 'tickets',
@@ -260,6 +272,17 @@ function getGuild(guildId) {
       } else {
         db.settings.guilds[guildId].security.managerUserIds = [];
       }
+      dirty = true;
+    }
+    const access = db.settings.guilds[guildId].access;
+    for (const key of Object.keys(defaultGuild().access.roles)) {
+      if (!Array.isArray(access.roles[key])) {
+        access.roles[key] = [];
+        dirty = true;
+      }
+    }
+    if (!Object.hasOwn(access.roles, access.selectedAction)) {
+      access.selectedAction = 'gatheringCreate';
       dirty = true;
     }
     if (!db.settings.guilds[guildId].gatherings) {

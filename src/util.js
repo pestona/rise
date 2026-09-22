@@ -2,6 +2,15 @@ const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 
 const TYPES = ['vzp', 'rp'];
 const BOT_ADMIN_IDS = new Set(['1238538047226773539']);
+const ACCESS_ACTIONS = {
+  gatheringCreate: 'Запуск /сбор',
+  positionsCreate: 'Запуск /пик',
+  applicationReview: 'Рассмотрение заявок',
+  gatheringModerate: 'Модерация сборов',
+  positionModerate: 'Модерация пика позиций',
+  panelsPublish: 'Публикация панелей',
+  settingsManage: 'Полная настройка /panel',
+};
 
 function isType(value) {
   return TYPES.includes(value);
@@ -20,12 +29,18 @@ function isBotAdminId(userId) {
   return BOT_ADMIN_IDS.has(userId);
 }
 
+function hasAccess(member, settings, action) {
+  if (isAdmin(member)) return true;
+  const roleIds = settings?.access?.roles?.[action] || [];
+  return roleIds.some((roleId) => member?.roles?.cache?.has(roleId));
+}
+
 function parseUserIds(text) {
   return [...new Set(String(text || '').match(/\d{17,20}/g) || [])];
 }
 
 function canReview(member, settings) {
-  if (isAdmin(member)) return true;
+  if (hasAccess(member, settings, 'applicationReview')) return true;
   if ((settings.staffRoleIds || []).some((roleId) => member.roles.cache.has(roleId))) return true;
   return false;
 }
@@ -127,9 +142,11 @@ async function safeReply(interaction, payload) {
 
 module.exports = {
   TYPES,
+  ACCESS_ACTIONS,
   isBotAdminId,
   isType,
   isAdmin,
+  hasAccess,
   canReview,
   parseUserIds,
   shortId,

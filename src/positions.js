@@ -8,7 +8,7 @@ const {
 } = require('discord.js');
 const store = require('./store');
 const { buildPositionsPanel } = require('./ui');
-const { isAdmin, truncate } = require('./util');
+const { hasAccess, truncate } = require('./util');
 
 function panelPayload(settings) {
   return {
@@ -85,9 +85,10 @@ async function publishPositionsPanel(interaction, channel) {
 }
 
 async function handlePickCommand(interaction) {
-  if (!isAdmin(interaction.member)) {
+  const settings = store.getGuild(interaction.guildId);
+  if (!hasAccess(interaction.member, settings, 'positionsCreate')) {
     return interaction.reply({
-      content: 'Команда доступна только администрации сервера.',
+      content: 'У вас нет доступа к команде `/пик`.',
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -231,7 +232,10 @@ async function sendModerationView(interaction, payload) {
 }
 
 async function openPositionModeration(interaction, notice = '') {
-  if (!isAdmin(interaction.member)) return denyModeration(interaction);
+  const settings = store.getGuild(interaction.guildId);
+  if (!hasAccess(interaction.member, settings, 'positionModerate')) {
+    return denyModeration(interaction);
+  }
   return sendModerationView(interaction, moderationListPayload(interaction.guild, notice));
 }
 
@@ -267,7 +271,10 @@ function moveClaim(guildId, from, to) {
 }
 
 async function handlePositionModeration(interaction, action, arg) {
-  if (!isAdmin(interaction.member)) return denyModeration(interaction);
+  const settings = store.getGuild(interaction.guildId);
+  if (!hasAccess(interaction.member, settings, 'positionModerate')) {
+    return denyModeration(interaction);
+  }
 
   if (action === 'mod' || action === 'modback') {
     return openPositionModeration(interaction);
