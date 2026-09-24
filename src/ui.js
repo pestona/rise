@@ -756,7 +756,9 @@ function buildGatheringsTab(guild) {
         `## Настройка сборов\n` +
           `Запуск: **\`/сбор\`** в нужном канале.\n` +
           `Роль для пинга выбирается прямо в команде.\n\n` +
-          `Активный сбор: ${activeText}`,
+          `Активный сбор: ${activeText}\n` +
+          `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
+          `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}`,
       ),
     )
     .addActionRowComponents((row) =>
@@ -767,6 +769,31 @@ function buildGatheringsTab(guild) {
           .setStyle(ButtonStyle.Danger)
           .setDisabled(!active),
         backToHubButton(),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Куда писать стату VZP после завершения сбора**'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:gathstats')
+          .setPlaceholder('Канал статистики VZP')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Кто может писать в ветке** (основа только видит, без этих ролей писать нельзя)'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:gaththreadroles')
+          .setPlaceholder('Выберите одну или несколько ролей')
+          .setMinValues(0)
+          .setMaxValues(25),
       ),
     );
 

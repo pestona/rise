@@ -181,6 +181,8 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
     }
     if (settings.gatherings) {
       settings.gatherings.listChannelId = mapChannel(settings.gatherings.listChannelId);
+      settings.gatherings.statsChannelId = mapChannel(settings.gatherings.statsChannelId);
+      settings.gatherings.threadRoleIds = (settings.gatherings.threadRoleIds || []).map(mapRole);
       if (settings.gatherings.active?.channelId) {
         settings.gatherings.active.channelId = mapChannel(settings.gatherings.active.channelId);
       }

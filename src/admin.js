@@ -46,7 +46,7 @@ const {
 } = require('./ui');
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
-const { closeActiveGathering, refreshGatheringPanels } = require('./gatherings');
+const { closeActiveGathering, refreshGatheringPanels, ensureGatheringThread } = require('./gatherings');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
 
@@ -1247,6 +1247,21 @@ async function handleAdminSelect(interaction) {
     store.updateGuild(interaction.guildId, (guild) => {
       guild.gatherings.listChannelId = interaction.values[0] || null;
     });
+    return showAdmin(interaction, 'gatherings');
+  }
+
+  if (action === 'gathstats') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.gatherings.statsChannelId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'gatherings');
+  }
+
+  if (action === 'gaththreadroles') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.gatherings.threadRoleIds = [...interaction.values];
+    });
+    await ensureGatheringThread(interaction.client, interaction.guildId).catch(() => null);
     return showAdmin(interaction, 'gatherings');
   }
 

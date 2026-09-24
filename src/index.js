@@ -131,6 +131,7 @@ setupMemberLogs(client);
 setupSecurity(client);
 setupBackupTimers(client);
 setupActivity(client);
+gatherings.setupGatheringThreadGuard(client);
 autopark.setupAutoparkTimers(client);
 
 client.once(Events.ClientReady, (readyClient) => {

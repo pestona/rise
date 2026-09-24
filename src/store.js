@@ -67,6 +67,8 @@ function defaultGuild() {
     },
     gatherings: {
       listChannelId: null,
+      statsChannelId: null,
+      threadRoleIds: [],
       selectedPresetId: 'mp',
       presets: [
         { id: 'family', name: 'Семейный сбор', description: 'Общий сбор семьи' },
@@ -292,6 +294,10 @@ function getGuild(guildId) {
       const gatherings = db.settings.guilds[guildId].gatherings;
       if (Object.hasOwn(gatherings, 'pingRoleId')) {
         delete gatherings.pingRoleId;
+        dirty = true;
+      }
+      if (!Array.isArray(gatherings.threadRoleIds)) {
+        gatherings.threadRoleIds = [];
         dirty = true;
       }
       if (!Array.isArray(gatherings.presets) || !gatherings.presets.length) {

@@ -3,6 +3,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  Events,
   MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
@@ -12,6 +13,7 @@ const store = require('./store');
 const { buildGatheringList, buildGatheringPanel } = require('./ui');
 const { hasAccess, shortId, truncate } = require('./util');
 const { recordGathering } = require('./activity');
+const { publishVzpStats, refreshVzpStats } = require('./vzpStats');
 
 const MAX_ROSTER = 50;
 
@@ -135,6 +137,41 @@ async function publishGatheringPanel(interaction, channel) {
   return { edited: false, message };
 }
 
+function canWriteInGatheringThread(member, settings) {
+  if (!member) return false;
+  const roleIds = settings.gatherings?.threadRoleIds || [];
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+async function applyThreadWriteRoles(thread, guildId) {
+  const roleIds = store.getGuild(guildId).gatherings?.threadRoleIds || [];
+  await thread.permissionOverwrites
+    .edit(thread.guildId, {
+      SendMessages: false,
+      SendMessagesInThreads: false,
+    })
+    .catch(() => null);
+
+  const keep = new Set(roleIds);
+  keep.add(thread.guildId);
+  if (thread.client.user?.id) keep.add(thread.client.user.id);
+
+  for (const overwrite of thread.permissionOverwrites.cache.values()) {
+    if (!keep.has(overwrite.id)) {
+      await thread.permissionOverwrites.delete(overwrite.id).catch(() => null);
+    }
+  }
+
+  for (const roleId of roleIds) {
+    await thread.permissionOverwrites
+      .edit(roleId, {
+        SendMessages: true,
+        SendMessagesInThreads: true,
+      })
+      .catch(() => null);
+  }
+}
+
 async function syncGatheringThread(client, guildId) {
   const gathering = getGathering(guildId);
   if (!gathering?.closed || !gathering.threadId) return null;
@@ -156,6 +193,7 @@ async function syncGatheringThread(client, guildId) {
     if (userId === botId || allowed.has(userId)) continue;
     await thread.members.remove(userId).catch(() => null);
   }
+  await applyThreadWriteRoles(thread, guildId);
   return thread;
 }
 
@@ -191,7 +229,7 @@ async function createGatheringThread(client, guildId) {
     .send({
       content:
         `Ветка сбора **${gathering.content || gathering.title}**.\n` +
-        `Доступ только у основы${main.length ? `:\n${main.map((id) => `<@${id}>`).join(' ')}` : '.'}`,
+        `В ветке только основа. Писать могут только выбранные роли.${main.length ? `\n${main.map((id) => `<@${id}>`).join(' ')}` : ''}`,
       allowedMentions: { users: main },
     })
     .catch(() => null);
@@ -221,6 +259,9 @@ async function closeActiveGathering(client, guildId) {
   await refreshGatheringPanels(client, guildId);
   await createGatheringThread(client, guildId);
   await refreshGatheringList(client, guildId, true);
+  await publishVzpStats(client, guildId).catch((error) => {
+    console.warn('Не удалось отправить стату VZP:', error.message);
+  });
   return true;
 }
 
@@ -483,6 +524,7 @@ async function afterRosterChange(interaction) {
   if (gathering?.closed) {
     await ensureGatheringThread(interaction.client, interaction.guildId);
     await refreshGatheringList(interaction.client, interaction.guildId, true);
+    await refreshVzpStats(interaction.client, interaction.guildId).catch(() => null);
   }
 }
 
@@ -749,6 +791,16 @@ async function handleGatheringAction(interaction) {
   });
 }
 
+function setupGatheringThreadGuard(client) {
+  client.on(Events.MessageCreate, async (message) => {
+    if (!message.guildId || message.author.bot || !message.channel?.isThread()) return;
+    const settings = store.getGuild(message.guildId);
+    if (settings.gatherings?.active?.threadId !== message.channelId) return;
+    if (canWriteInGatheringThread(message.member, settings)) return;
+    await message.delete().catch(() => null);
+  });
+}
+
 module.exports = {
   publishGatheringPanel,
   refreshGatheringPanels,
@@ -756,4 +808,6 @@ module.exports = {
   handleGatheringAction,
   handleGatheringCommand,
   openGatheringModeration,
+  ensureGatheringThread,
+  setupGatheringThreadGuard,
 };
