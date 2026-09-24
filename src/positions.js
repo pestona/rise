@@ -59,23 +59,30 @@ async function refreshPositionPanels(client, guildId) {
   }
 }
 
-async function publishPositionsPanel(interaction, channel) {
-  const settings = store.getGuild(interaction.guildId);
-  const existing = store
-    .listPanels(interaction.guildId)
-    .find((item) => item.key === 'positions' && item.channelId === channel.id);
+async function freezePositionPanels(client, guildId) {
+  const settings = store.getGuild(guildId);
+  const payload = { ...panelPayload(settings), components: [] };
 
-  if (existing) {
+  for (const entry of store.listPanels(guildId).filter((item) => item.key === 'positions')) {
     try {
-      const message = await channel.messages.fetch(existing.messageId);
-      await message.edit(panelPayload(settings));
-      return { edited: true, message };
-    } catch {
-      // Сообщение удалено — создадим новое.
+      const channel = await client.channels.fetch(entry.channelId);
+      const message = await channel.messages.fetch(entry.messageId);
+      await message.edit(payload);
+    } catch (error) {
+      if (error.code !== 10008) {
+        console.warn('Не удалось заморозить панель позиций:', error.message);
+      }
     }
   }
 
-  const message = await channel.send(panelPayload(settings));
+  store.setPanels(
+    guildId,
+    store.listPanels(guildId).filter((item) => item.key !== 'positions'),
+  );
+}
+
+async function publishPositionsPanel(interaction, channel) {
+  const message = await channel.send(panelPayload(store.getGuild(interaction.guildId)));
   store.rememberPanel(interaction.guildId, {
     key: 'positions',
     channelId: channel.id,
@@ -103,19 +110,15 @@ async function handlePickCommand(interaction) {
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await freezePositionPanels(interaction.client, interaction.guildId);
   store.updateGuild(interaction.guildId, (guild) => {
     guild.positions.slotCount = slotCount;
     guild.positions.imageUrl = image.url;
     guild.positions.claims = {};
   });
 
-  const result = await publishPositionsPanel(interaction, interaction.channel);
-  await refreshPositionPanels(interaction.client, interaction.guildId);
-  await interaction.editReply(
-    result.edited
-      ? `Панель обновлена: **${slotCount}** позиций.`
-      : `Панель создана: **${slotCount}** позиций.`,
-  );
+  await publishPositionsPanel(interaction, interaction.channel);
+  await interaction.editReply(`Новая панель создана: **${slotCount}** позиций.`);
 }
 
 function denyModeration(interaction) {
