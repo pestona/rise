@@ -694,7 +694,8 @@ function buildGatheringList(guild, options = {}) {
     .setDescription(
       `**Время:** ${formatGatheringTime(active)}\n` +
         `**Контент:** ${content}\n` +
-        `**Участников:** ${main.length}/${maxMain || '—'}`,
+        `**Участников:** ${main.length}/${maxMain || '—'}` +
+        (closed && active?.threadId ? `\n**Ветка основы:** <#${active.threadId}>` : ''),
     )
     .addFields(
       {

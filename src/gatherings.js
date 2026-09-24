@@ -135,6 +135,78 @@ async function publishGatheringPanel(interaction, channel) {
   return { edited: false, message };
 }
 
+async function syncGatheringThread(client, guildId) {
+  const gathering = getGathering(guildId);
+  if (!gathering?.closed || !gathering.threadId) return null;
+
+  const thread = await client.channels.fetch(gathering.threadId).catch(() => null);
+  if (!thread?.isThread()) return null;
+
+  const allowed = new Set(gathering.main || []);
+  const members = await thread.members.fetch().catch(() => null);
+  const current = new Set(members?.keys() || []);
+  const botId = client.user?.id;
+
+  for (const userId of allowed) {
+    if (!current.has(userId)) {
+      await thread.members.add(userId).catch(() => null);
+    }
+  }
+  for (const userId of current) {
+    if (userId === botId || allowed.has(userId)) continue;
+    await thread.members.remove(userId).catch(() => null);
+  }
+  return thread;
+}
+
+async function createGatheringThread(client, guildId) {
+  const gathering = getGathering(guildId);
+  if (!gathering?.closed || gathering.threadId || !gathering.channelId) return null;
+
+  const channel = await client.channels.fetch(gathering.channelId).catch(() => null);
+  if (!channel?.threads) return null;
+
+  let thread;
+  try {
+    thread = await channel.threads.create({
+      name: truncate(`Сбор · ${gathering.content || gathering.title || 'основа'}`, 100),
+      type: ChannelType.PrivateThread,
+      invitable: false,
+      autoArchiveDuration: 10080,
+      reason: 'Ветка сбора для основы',
+    });
+  } catch (error) {
+    console.warn('Не удалось создать ветку сбора:', error.message);
+    return null;
+  }
+
+  store.updateGuild(guildId, (guild) => {
+    if (guild.gatherings.active?.id === gathering.id) {
+      guild.gatherings.active.threadId = thread.id;
+    }
+  });
+
+  const main = gathering.main || [];
+  await thread
+    .send({
+      content:
+        `Ветка сбора **${gathering.content || gathering.title}**.\n` +
+        `Доступ только у основы${main.length ? `:\n${main.map((id) => `<@${id}>`).join(' ')}` : '.'}`,
+      allowedMentions: { users: main },
+    })
+    .catch(() => null);
+
+  await syncGatheringThread(client, guildId);
+  return thread;
+}
+
+async function ensureGatheringThread(client, guildId) {
+  const gathering = getGathering(guildId);
+  if (!gathering?.closed) return null;
+  if (gathering.threadId) return syncGatheringThread(client, guildId);
+  return createGatheringThread(client, guildId);
+}
+
 async function closeActiveGathering(client, guildId) {
   const active = getActive(guildId);
   if (!active) return false;
@@ -147,6 +219,8 @@ async function closeActiveGathering(client, guildId) {
   recordGathering(guildId, active);
   await refreshGatheringList(client, guildId, true);
   await refreshGatheringPanels(client, guildId);
+  await createGatheringThread(client, guildId);
+  await refreshGatheringList(client, guildId, true);
   return true;
 }
 
@@ -406,6 +480,10 @@ async function afterRosterChange(interaction) {
   const gathering = getGathering(interaction.guildId);
   await refreshGatheringList(interaction.client, interaction.guildId, Boolean(gathering?.closed));
   await refreshGatheringPanels(interaction.client, interaction.guildId);
+  if (gathering?.closed) {
+    await ensureGatheringThread(interaction.client, interaction.guildId);
+    await refreshGatheringList(interaction.client, interaction.guildId, true);
+  }
 }
 
 async function handleGatheringCommand(interaction) {
@@ -528,14 +606,25 @@ async function handleGatheringAction(interaction) {
     if (!canManage(interaction.member, settings)) return denyManage(interaction);
     const closed = await closeActiveGathering(interaction.client, interaction.guildId);
     if (interaction.message?.flags?.has(MessageFlags.Ephemeral)) {
+      const threadId = getGathering(interaction.guildId)?.threadId;
       return interaction.update({
-        content: closed ? 'Сбор завершён.' : 'Открытого сбора не было.',
+        content: closed
+          ? threadId
+            ? `Сбор завершён. Ветка основы: <#${threadId}>.`
+            : 'Сбор завершён.'
+          : 'Открытого сбора не было.',
         components: [],
       });
     }
     if (closed) {
       await refreshGatheringPanels(interaction.client, interaction.guildId);
-      return interaction.reply({ content: 'Сбор завершён.', flags: MessageFlags.Ephemeral });
+      const threadId = getGathering(interaction.guildId)?.threadId;
+      return interaction.reply({
+        content: threadId
+          ? `Сбор завершён. Ветка основы: <#${threadId}>.`
+          : 'Сбор завершён. Ветку основы создать не удалось — проверьте право бота «Создавать приватные ветки».',
+        flags: MessageFlags.Ephemeral,
+      });
     }
     return interaction.reply({ content: 'Открытого сбора нет.', flags: MessageFlags.Ephemeral });
   }
