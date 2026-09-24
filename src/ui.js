@@ -276,7 +276,7 @@ function buildSummary(guild) {
     `${vehicleBindings}\n\n` +
     `### Сборы\n` +
     `Пинг активного сбора: ${gatheringPings}\n` +
-    `Активный: **${activeGathering ? `${activeGathering.content || activeGathering.title}` : 'нет'}**`;
+    `Активный: **${activeGathering && !activeGathering.closed ? `${activeGathering.content || activeGathering.title}` : 'нет'}**`;
 
   return new ContainerBuilder()
     .setAccentColor(0x5865f2)
@@ -652,7 +652,7 @@ function formatGatheringTime(active) {
 
 function buildGatheringPanel(guild) {
   const gatherings = guild.gatherings || {};
-  const active = gatherings.active;
+  const active = gatherings.active && !gatherings.active.closed ? gatherings.active : null;
   const maxMain = active?.maxMain || 0;
   const activeText = active
     ? `**Сейчас открыт**\nВремя: ${formatGatheringTime(active)}\nКонтент: **${active.content || active.title}**\nУчастников: **${active.main?.length || 0}/${maxMain || '∞'}** · Замена: **${active.bench?.length || 0}**`
@@ -678,9 +678,11 @@ function buildGatheringPanel(guild) {
   };
 }
 
-function buildGatheringList(guild, closed = false) {
+function buildGatheringList(guild, options = {}) {
   const gatherings = guild.gatherings || {};
   const active = gatherings.active;
+  const closed = typeof options === 'boolean' ? options : Boolean(options.closed || active?.closed);
+  const frozen = typeof options === 'object' && Boolean(options.frozen);
   const content = active?.content || active?.title || 'Сбор';
   const main = active?.main || [];
   const bench = active?.bench || [];
@@ -726,8 +728,7 @@ function buildGatheringList(guild, closed = false) {
     new ButtonBuilder()
       .setCustomId('gath:mod')
       .setLabel('Модерация')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(closed),
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('gath:close')
       .setLabel('Завершить')
@@ -735,15 +736,17 @@ function buildGatheringList(guild, closed = false) {
       .setDisabled(closed),
   );
 
-  return { embeds: [embed], components: closed ? [] : [actions] };
+  return { embeds: [embed], components: frozen ? [] : [actions] };
 }
 
 function buildGatheringsTab(guild) {
   const gatherings = guild.gatherings || {};
-  const active = gatherings.active;
+  const active = gatherings.active && !gatherings.active.closed ? gatherings.active : null;
   const activeText = active
     ? `**${active.content || active.title}** · основа ${active.main?.length || 0}/${active.maxMain || '—'}`
-    : 'нет';
+    : gatherings.active?.closed
+      ? `завершён · **${gatherings.active.content || gatherings.active.title}**`
+      : 'нет';
 
   const container = new ContainerBuilder().setAccentColor(0x95a5a6);
   container

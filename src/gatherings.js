@@ -22,9 +22,9 @@ function panelPayload(settings) {
   };
 }
 
-function listPayload(settings, closed = false) {
+function listPayload(settings, closed = false, frozen = false) {
   return {
-    ...buildGatheringList(settings, closed),
+    ...buildGatheringList(settings, { closed, frozen }),
     allowedMentions: { parse: [] },
   };
 }
@@ -33,8 +33,13 @@ function canManage(member, settings) {
   return hasAccess(member, settings, 'gatheringModerate');
 }
 
-function getActive(guildId) {
+function getGathering(guildId) {
   return store.getGuild(guildId).gatherings?.active || null;
+}
+
+function getActive(guildId) {
+  const gathering = getGathering(guildId);
+  return gathering && !gathering.closed ? gathering : null;
 }
 
 function occupantName(guild, userId) {
@@ -84,19 +89,25 @@ async function refreshGatheringPanels(client, guildId) {
   }
 }
 
-async function refreshGatheringList(client, guildId, closed = false) {
+async function refreshGatheringList(client, guildId, closed = false, frozen = false) {
   const settings = store.getGuild(guildId);
-  const active = settings.gatherings?.active;
-  if (!active?.channelId || !active?.messageId) return;
+  const gathering = settings.gatherings?.active;
+  if (!gathering?.channelId || !gathering?.messageId) return;
   try {
-    const channel = await client.channels.fetch(active.channelId);
-    const message = await channel.messages.fetch(active.messageId);
-    await message.edit(listPayload(settings, closed));
+    const channel = await client.channels.fetch(gathering.channelId);
+    const message = await channel.messages.fetch(gathering.messageId);
+    await message.edit(listPayload(settings, closed || Boolean(gathering.closed), frozen));
   } catch (error) {
     if (error.code !== 10008) {
       console.warn('Не удалось обновить список сбора:', error.message);
     }
   }
+}
+
+async function freezeGatheringList(client, guildId) {
+  const gathering = getGathering(guildId);
+  if (!gathering) return;
+  await refreshGatheringList(client, guildId, true, true);
 }
 
 async function publishGatheringPanel(interaction, channel) {
@@ -127,11 +138,14 @@ async function publishGatheringPanel(interaction, channel) {
 async function closeActiveGathering(client, guildId) {
   const active = getActive(guildId);
   if (!active) return false;
-  await refreshGatheringList(client, guildId, true);
-  recordGathering(guildId, active);
   store.updateGuild(guildId, (guild) => {
-    guild.gatherings.active = null;
+    if (guild.gatherings.active && !guild.gatherings.active.closed) {
+      guild.gatherings.active.closed = true;
+      guild.gatherings.active.closedAt = Date.now();
+    }
   });
+  recordGathering(guildId, active);
+  await refreshGatheringList(client, guildId, true);
   await refreshGatheringPanels(client, guildId);
   return true;
 }
@@ -274,7 +288,7 @@ function moderationHomePayload(guild, notice = '') {
   const active = store.getGuild(guild.id).gatherings?.active;
   if (!active) {
     return {
-      content: 'Сейчас нет открытого сбора.',
+      content: 'Списка сбора нет.',
       components: [],
     };
   }
@@ -340,7 +354,7 @@ function moderationHomePayload(guild, notice = '') {
 
   return {
     content: truncate(
-      `${notice ? `${notice}\n\n` : ''}## Модерация сбора · ${active.title}\n\n${listText}`,
+      `${notice ? `${notice}\n\n` : ''}## Модерация сбора · ${active.title}${active.closed ? ' · завершён' : ''}\n\n${listText}`,
       1900,
     ),
     components,
@@ -389,7 +403,8 @@ async function openGatheringModeration(interaction, notice = '') {
 }
 
 async function afterRosterChange(interaction) {
-  await refreshGatheringList(interaction.client, interaction.guildId);
+  const gathering = getGathering(interaction.guildId);
+  await refreshGatheringList(interaction.client, interaction.guildId, Boolean(gathering?.closed));
   await refreshGatheringPanels(interaction.client, interaction.guildId);
 }
 
@@ -449,6 +464,9 @@ async function handleGatheringCommand(interaction) {
   if (getActive(interaction.guildId)) {
     await closeActiveGathering(interaction.client, interaction.guildId);
   }
+  if (getGathering(interaction.guildId)) {
+    await freezeGatheringList(interaction.client, interaction.guildId);
+  }
 
   const gathering = {
     id: shortId(),
@@ -463,6 +481,7 @@ async function handleGatheringCommand(interaction) {
     messageId: null,
     pingRoleIds,
     pingEveryone,
+    closed: false,
     main: [],
     bench: [],
   };
@@ -536,7 +555,7 @@ async function handleGatheringAction(interaction) {
     const userId = interaction.values[0];
     const list = arg === 'bench' ? 'bench' : 'main';
     if (!active) {
-      return sendEphemeralView(interaction, { content: 'Сейчас нет открытого сбора.', components: [] });
+      return sendEphemeralView(interaction, { content: 'Списка сбора нет.', components: [] });
     }
     const result = addUser(interaction.guildId, userId, list);
     await afterRosterChange(interaction);
@@ -577,7 +596,14 @@ async function handleGatheringAction(interaction) {
 
   if (!active) {
     return interaction.reply({
-      content: 'Сейчас нет открытого сбора.',
+      content: 'Списка сбора нет.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (active.closed && (action === 'join' || action === 'leave')) {
+    return interaction.reply({
+      content: 'Сбор уже завершён. Записаться или выписаться нельзя, список правит только модерация.',
       flags: MessageFlags.Ephemeral,
     });
   }

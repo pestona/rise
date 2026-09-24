@@ -321,6 +321,10 @@ function getGuild(guildId) {
           gatherings.active.bench = [];
           dirty = true;
         }
+        if (typeof gatherings.active.closed !== 'boolean') {
+          gatherings.active.closed = false;
+          dirty = true;
+        }
       }
     }
     if (['gatherings', 'positions'].includes(db.settings.guilds[guildId].publishPanelKey)) {
