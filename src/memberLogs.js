@@ -4,6 +4,16 @@ const store = require('./store');
 const recentBans = new Map();
 const AUDIT_WINDOW = 15_000;
 
+function leftUserName(member) {
+  const user = member.user;
+  return member.displayName || user?.globalName || user?.username || user?.tag || `ID ${member.id}`;
+}
+
+function leftUserTag(member) {
+  const user = member.user;
+  return user?.tag || user?.username || member.id;
+}
+
 function rolesText(member) {
   if (!member.roles?.cache || typeof member.roles.cache.filter !== 'function') return '—';
   const roles = member.roles.cache
@@ -43,10 +53,11 @@ async function sendLeaveLog(member) {
   const channel = await getLogChannel(member.guild, settings.logs?.leaveChannelId);
   if (!channel) return;
 
+  const name = leftUserName(member);
   const embed = new EmbedBuilder()
     .setColor(0x747f8d)
-    .setTitle(`Пользователь покинул ${member.guild.name}`)
-    .setDescription(`Пользователь покинул сервер: <@${member.id}>`)
+    .setTitle(`${name} покинул ${member.guild.name}`)
+    .setDescription(`**${name}** · \`${leftUserTag(member)}\`\n<@${member.id}>`)
     .addFields({ name: 'Роли пользователя', value: rolesText(member) })
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .setFooter({ text: `ID: ${member.id}` })
