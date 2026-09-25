@@ -1216,6 +1216,10 @@ async function handleAdminSelect(interaction) {
       if (typeKey === 'leave') guild.logs.leaveChannelId = interaction.values[0] || null;
       if (typeKey === 'moderation') guild.logs.moderationChannelId = interaction.values[0] || null;
       if (typeKey === 'roles') guild.logs.watchedRoleIds = [...interaction.values];
+      if (typeKey === 'afk') {
+        if (!guild.afk) guild.afk = { entries: [], logChannelId: null };
+        guild.afk.logChannelId = interaction.values[0] || null;
+      }
     });
     return showAdmin(interaction, 'logs');
   }

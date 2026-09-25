@@ -276,6 +276,7 @@ function buildSummary(guild) {
     `### Общие логи\n` +
     `Выходы: ${channelMention(guild.logs?.leaveChannelId)}\n` +
     `Кики/баны: ${channelMention(guild.logs?.moderationChannelId)}\n` +
+    `AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
     `Роли выходов: ${watchedRoles}\n\n` +
     `### Автопарк\n` +
     `Общее время аренды: **${guild.autopark?.durationMinutes || 60} мин.** · Машин: **${vehicles.length}**\n` +
@@ -457,6 +458,7 @@ function buildLogsTab(guild) {
       text.setContent(
         `Выходы: ${channelMention(logs.leaveChannelId)}\n` +
           `Кики и баны: ${channelMention(logs.moderationChannelId)}\n` +
+          `AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
           `Отслеживаемые роли: ${rolesText}`,
       ),
     )
@@ -487,6 +489,17 @@ function buildLogsTab(guild) {
         new ChannelSelectMenuBuilder()
           .setCustomId('admin:logs:moderation')
           .setPlaceholder('Канал киков и банов')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Канал логов AFK**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:logs:afk')
+          .setPlaceholder('Канал логов AFK')
           .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
           .setMinValues(0)
           .setMaxValues(1),
@@ -1340,6 +1353,22 @@ function buildAfkPanel(guild) {
   return container;
 }
 
+function buildAfkLog(entry) {
+  const until = Math.floor(entry.endsAt / 1000);
+  const reason = String(entry.reason || 'без причины').replace(/\s+/g, ' ');
+  const container = new ContainerBuilder().setAccentColor(0x000000);
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      `## AFK\n` +
+        `**Кто:** <@${entry.userId}>\n` +
+        `**Причина:** ${reason}\n` +
+        `**На сколько:** ${entry.durationLabel || formatAfkDuration(entry.endsAt - entry.startedAt)}\n` +
+        `**До:** <t:${until}:t> · <t:${until}:R>`,
+    ),
+  );
+  return container;
+}
+
 function buildAfkList(guild) {
   const entries = activeAfkEntries(guild);
   const list = entries.length
@@ -1380,5 +1409,6 @@ module.exports = {
   buildApplicationContainer,
   buildAfkPanel,
   buildAfkList,
+  buildAfkLog,
   formatAfkDuration,
 };

@@ -1,5 +1,6 @@
 const {
   ActionRowBuilder,
+  ChannelType,
   Events,
   MessageFlags,
   ModalBuilder,
@@ -7,7 +8,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const store = require('./store');
-const { buildAfkList, buildAfkPanel, formatAfkDuration, v2Flags } = require('./ui');
+const { buildAfkList, buildAfkLog, buildAfkPanel, formatAfkDuration, v2Flags } = require('./ui');
 const { truncate } = require('./util');
 
 const MIN_AFK_MS = 60_000;
@@ -46,6 +47,20 @@ function parseAfkDuration(raw) {
   const ms = hours * 3_600_000 + minutes * 60_000;
   if (ms < MIN_AFK_MS || ms > MAX_AFK_MS) return null;
   return ms;
+}
+
+async function sendAfkLog(client, guildId, entry) {
+  const channelId = store.getGuild(guildId).afk?.logChannelId;
+  if (!channelId) return;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased() || channel.type === ChannelType.GuildForum) return;
+  await channel
+    .send({
+      components: [buildAfkLog(entry)],
+      flags: v2Flags(false),
+      allowedMentions: { parse: [] },
+    })
+    .catch((error) => console.warn('Не удалось отправить лог AFK:', error.message));
 }
 
 async function refreshAfkPanels(client, guildId) {
@@ -186,21 +201,23 @@ async function handleAfkModal(interaction) {
 
   const now = Date.now();
   const durationLabel = formatAfkDuration(durationMs);
+  const entry = {
+    userId: interaction.user.id,
+    reason,
+    durationLabel,
+    startedAt: now,
+    endsAt: now + durationMs,
+  };
   store.updateGuild(interaction.guildId, (guild) => {
-    guild.afk.entries = (guild.afk.entries || []).filter((entry) => entry.userId !== interaction.user.id);
-    guild.afk.entries.push({
-      userId: interaction.user.id,
-      reason,
-      durationLabel,
-      startedAt: now,
-      endsAt: now + durationMs,
-    });
+    guild.afk.entries = (guild.afk.entries || []).filter((item) => item.userId !== interaction.user.id);
+    guild.afk.entries.push(entry);
   });
 
   await interaction.reply({
     content: `Вы ушли в AFK на **${durationLabel}**. Причина: ${reason}`,
     flags: MessageFlags.Ephemeral,
   });
+  await sendAfkLog(interaction.client, interaction.guildId, entry);
   await refreshAfkPanels(interaction.client, interaction.guildId);
 }
 

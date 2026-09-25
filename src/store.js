@@ -62,6 +62,7 @@ function defaultGuild() {
     },
     afk: {
       entries: [],
+      logChannelId: null,
     },
     positions: {
       imageUrl: '',
@@ -290,9 +291,18 @@ function getGuild(guildId) {
       access.selectedAction = 'gatheringCreate';
       dirty = true;
     }
-    if (!db.settings.guilds[guildId].afk || !Array.isArray(db.settings.guilds[guildId].afk.entries)) {
-      db.settings.guilds[guildId].afk = { entries: [] };
+    if (!db.settings.guilds[guildId].afk) {
+      db.settings.guilds[guildId].afk = defaultGuild().afk;
       dirty = true;
+    } else {
+      if (!Array.isArray(db.settings.guilds[guildId].afk.entries)) {
+        db.settings.guilds[guildId].afk.entries = [];
+        dirty = true;
+      }
+      if (!Object.hasOwn(db.settings.guilds[guildId].afk, 'logChannelId')) {
+        db.settings.guilds[guildId].afk.logChannelId = null;
+        dirty = true;
+      }
     }
     if (!db.settings.guilds[guildId].gatherings) {
       db.settings.guilds[guildId].gatherings = defaultGuild().gatherings;

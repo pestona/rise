@@ -179,6 +179,9 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
         settings.access.roles[key] = settings.access.roles[key].map(mapRole);
       }
     }
+    if (settings.afk) {
+      settings.afk.logChannelId = mapChannel(settings.afk.logChannelId);
+    }
     if (settings.gatherings) {
       settings.gatherings.listChannelId = mapChannel(settings.gatherings.listChannelId);
       settings.gatherings.statsChannelId = mapChannel(settings.gatherings.statsChannelId);
