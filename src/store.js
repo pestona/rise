@@ -60,6 +60,9 @@ function defaultGuild() {
       selectedVehicleId: null,
       durationMinutes: 60,
     },
+    afk: {
+      entries: [],
+    },
     positions: {
       imageUrl: '',
       slotCount: 10,
@@ -285,6 +288,10 @@ function getGuild(guildId) {
     }
     if (!Object.hasOwn(access.roles, access.selectedAction)) {
       access.selectedAction = 'gatheringCreate';
+      dirty = true;
+    }
+    if (!db.settings.guilds[guildId].afk || !Array.isArray(db.settings.guilds[guildId].afk.entries)) {
+      db.settings.guilds[guildId].afk = { entries: [] };
       dirty = true;
     }
     if (!db.settings.guilds[guildId].gatherings) {

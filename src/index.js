@@ -19,6 +19,7 @@ const { safeReply } = require('./util');
 const { setupMemberLogs } = require('./memberLogs');
 const { setupSecurity, setupBackupTimers } = require('./security');
 const { setupActivity } = require('./activity');
+const afk = require('./afk');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -133,6 +134,7 @@ setupBackupTimers(client);
 setupActivity(client);
 gatherings.setupGatheringThreadGuard(client);
 autopark.setupAutoparkTimers(client);
+afk.setupAfk(client);
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Бот запущен как ${readyClient.user.tag}`);
@@ -175,6 +177,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isButton() && interaction.customId.startsWith('car:')) {
       await autopark.handleVehicleAction(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('afk:')) {
+      await afk.handleAfkButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'afk:modal') {
+      await afk.handleAfkModal(interaction);
       return;
     }
 

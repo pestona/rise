@@ -118,6 +118,11 @@ const PUBLIC_PANELS = [
     label: 'Автопарк',
     description: 'Выдача и возврат машин',
   },
+  {
+    key: 'afk',
+    label: 'AFK',
+    description: 'Уход в AFK с причиной и временем',
+  },
 ];
 
 function buildAdminHub(guild, botName) {
@@ -219,6 +224,7 @@ function buildSummary(guild) {
   const panelNames = {
     tickets: 'Заявки в семью',
     autopark: 'Автопарк',
+    afk: 'AFK',
     gatherings: 'Сборы',
   };
   const published = (guild.panels || []).length
@@ -1298,6 +1304,59 @@ function buildApplicationContainer(
   return container;
 }
 
+function formatAfkDuration(ms) {
+  const totalMin = Math.max(1, Math.round(Math.max(0, ms) / 60_000));
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  if (hours && minutes) return `${hours}ч ${minutes}м`;
+  if (hours) return `${hours}ч`;
+  return `${minutes}м`;
+}
+
+function activeAfkEntries(guild) {
+  const now = Date.now();
+  return (guild.afk?.entries || []).filter((entry) => entry.endsAt > now);
+}
+
+function buildAfkPanel(guild) {
+  const count = activeAfkEntries(guild).length;
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## AFK\n` +
+          `Уйдите в AFK с указанием причины и времени.\n` +
+          `По истечении срока вы автоматически пропадёте из списка.\n\n` +
+          `Сейчас в AFK: **${count}**`,
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder().setCustomId('afk:join').setLabel('Уйти в AFK').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('afk:leave').setLabel('Выйти с AFK').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('afk:list').setLabel('Список AFK').setStyle(ButtonStyle.Primary),
+      ),
+    );
+  return container;
+}
+
+function buildAfkList(guild) {
+  const entries = activeAfkEntries(guild);
+  const list = entries.length
+    ? entries
+        .map((entry, index) => {
+          const until = Math.floor(entry.endsAt / 1000);
+          const reason = String(entry.reason || 'без причины').replace(/\s+/g, ' ');
+          return `${index + 1}. <@${entry.userId}> — ${reason} · **${entry.durationLabel || formatAfkDuration(entry.endsAt - entry.startedAt)}** · <t:${until}:R>`;
+        })
+        .join('\n')
+    : '_Сейчас никого нет в AFK._';
+
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container.addTextDisplayComponents((text) => text.setContent(`## Список AFK\n${truncate(list, 3800)}`));
+  return container;
+}
+
 module.exports = {
   v2Flags,
   buildPublicPanel,
@@ -1319,4 +1378,7 @@ module.exports = {
   buildTypePage,
   buildDeleteQuestionMenu,
   buildApplicationContainer,
+  buildAfkPanel,
+  buildAfkList,
+  formatAfkDuration,
 };

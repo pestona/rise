@@ -46,6 +46,7 @@ const {
 } = require('./ui');
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
+const { publishAfkPanel } = require('./afk');
 const { closeActiveGathering, refreshGatheringPanels, ensureGatheringThread } = require('./gatherings');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
@@ -1290,7 +1291,9 @@ async function handleAdminSelect(interaction) {
       const result =
         panelKey === 'autopark'
           ? await publishAutoparkPanel(interaction, channel)
-          : await publishPanel(interaction, channel);
+          : panelKey === 'afk'
+            ? await publishAfkPanel(interaction, channel)
+            : await publishPanel(interaction, channel);
       await interaction.update(adminPayload(interaction, 'panels'));
       await interaction.followUp({
         content: result.edited ? `Панель обновлена в ${channel}.` : `Панель опубликована в ${channel}.`,
