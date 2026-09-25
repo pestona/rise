@@ -1320,7 +1320,7 @@ function activeAfkEntries(guild) {
 
 function buildAfkPanel(guild) {
   const count = activeAfkEntries(guild).length;
-  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  const container = new ContainerBuilder().setAccentColor(0x000000);
   container
     .addTextDisplayComponents((text) =>
       text.setContent(
@@ -1352,7 +1352,7 @@ function buildAfkList(guild) {
         .join('\n')
     : '_Сейчас никого нет в AFK._';
 
-  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  const container = new ContainerBuilder().setAccentColor(0x000000);
   container.addTextDisplayComponents((text) => text.setContent(`## Список AFK\n${truncate(list, 3800)}`));
   return container;
 }
