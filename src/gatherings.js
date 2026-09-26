@@ -44,6 +44,35 @@ function getActive(guildId) {
   return gathering && !gathering.closed ? gathering : null;
 }
 
+function snapshotGathering(gathering) {
+  if (!gathering?.id) return null;
+  return {
+    id: gathering.id,
+    title: gathering.content || gathering.title,
+    timeAt: gathering.timeAt || null,
+    startedAt: gathering.startedAt || null,
+    closedAt: gathering.closedAt || null,
+    threadId: gathering.threadId || null,
+    channelId: gathering.channelId || null,
+    maxMain: gathering.maxMain || 0,
+    main: [...(gathering.main || [])],
+    bench: [...(gathering.bench || [])],
+  };
+}
+
+function archiveGathering(guildId) {
+  const gathering = getGathering(guildId);
+  const snap = snapshotGathering(gathering);
+  if (!snap) return;
+  store.updateGuild(guildId, (guild) => {
+    if (!Array.isArray(guild.gatherings.history)) guild.gatherings.history = [];
+    guild.gatherings.history = [
+      snap,
+      ...guild.gatherings.history.filter((item) => item.id !== snap.id),
+    ].slice(0, 40);
+  });
+}
+
 function occupantName(guild, userId) {
   const member = guild.members.cache.get(userId);
   return member?.displayName || member?.user?.username || userId;
@@ -259,6 +288,7 @@ async function closeActiveGathering(client, guildId) {
   await refreshGatheringPanels(client, guildId);
   await createGatheringThread(client, guildId);
   await refreshGatheringList(client, guildId, true);
+  archiveGathering(guildId);
   await publishVzpStats(client, guildId).catch((error) => {
     console.warn('Не удалось отправить стату VZP:', error.message);
   });
@@ -522,6 +552,7 @@ async function afterRosterChange(interaction) {
   await refreshGatheringList(interaction.client, interaction.guildId, Boolean(gathering?.closed));
   await refreshGatheringPanels(interaction.client, interaction.guildId);
   if (gathering?.closed) {
+    archiveGathering(interaction.guildId);
     await ensureGatheringThread(interaction.client, interaction.guildId);
     await refreshGatheringList(interaction.client, interaction.guildId, true);
     await refreshVzpStats(interaction.client, interaction.guildId).catch(() => null);

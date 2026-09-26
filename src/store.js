@@ -81,6 +81,7 @@ function defaultGuild() {
         { id: 'train', name: 'Тренировка', description: 'Тренировочный сбор' },
       ],
       active: null,
+      history: [],
     },
     security: {
       enabled: false,
@@ -321,6 +322,10 @@ function getGuild(guildId) {
         gatherings.presets = defaultGuild().gatherings.presets;
         dirty = true;
       }
+      if (!Array.isArray(gatherings.history)) {
+        gatherings.history = [];
+        dirty = true;
+      }
       if (gatherings.active) {
         if (!Array.isArray(gatherings.active.pingRoleIds)) {
           gatherings.active.pingRoleIds = gatherings.active.pingRoleId
@@ -346,6 +351,25 @@ function getGuild(guildId) {
         }
         if (typeof gatherings.active.closed !== 'boolean') {
           gatherings.active.closed = false;
+          dirty = true;
+        }
+        if (
+          gatherings.active.closed &&
+          gatherings.active.id &&
+          !gatherings.history.some((item) => item.id === gatherings.active.id)
+        ) {
+          gatherings.history.unshift({
+            id: gatherings.active.id,
+            title: gatherings.active.content || gatherings.active.title,
+            timeAt: gatherings.active.timeAt || null,
+            startedAt: gatherings.active.startedAt || null,
+            closedAt: gatherings.active.closedAt || null,
+            threadId: gatherings.active.threadId || null,
+            channelId: gatherings.active.channelId || null,
+            maxMain: gatherings.active.maxMain || 0,
+            main: [...(gatherings.active.main || [])],
+            bench: [...(gatherings.active.bench || [])],
+          });
           dirty = true;
         }
       }

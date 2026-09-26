@@ -11,7 +11,24 @@ const { truncate } = require('./util');
 const API = 'https://vzp-gta5rp.com/api';
 const FAMILY_NAME = 'RiseFam';
 const SERVER_ID = 25;
+const MATCH_WINDOW_MS = 3 * 60 * 60 * 1000;
 const watchers = new Map();
+
+const MAP_NAMES = {
+  NEW_B_GHETTO_ANTS: 'Муравейник',
+  NEW_S_GHETTO_ANTS: 'Муравейник',
+  NEW_S_SANDYSHORES: 'Сэнди-Шорс',
+  NEW_S_WINDFARM: 'Ветряки',
+  NEW_S_ELBURRO: 'Эль-Бурро',
+  NEW_S_BANNING_ANGAR: 'Ангар',
+  NEW_B_LS_CINEMA: 'Киностудия',
+  NEW_S_EL_RANCHO_SMALL_OILBASE: 'Нефтебаза',
+  NEW_S_PUERTA_DUMP: 'Мусорка',
+};
+
+function mapName(code) {
+  return MAP_NAMES[code] || code || 'карта';
+}
 
 function normalizeNick(name) {
   return String(name || '')
@@ -108,21 +125,69 @@ function memberKeys(member) {
 function findMember(guild, charName) {
   const key = normalizeNick(charName);
   if (!key) return null;
+  const exact = guild.members.cache.find((member) => memberKeys(member).includes(key));
+  if (exact) return exact;
+  if (key.length < 5) return null;
   return (
-    guild.members.cache.find((member) => memberKeys(member).includes(key)) ||
-    null
+    guild.members.cache.find((member) =>
+      memberKeys(member).some(
+        (nick) => nick.length >= 5 && (nick.includes(key) || key.includes(nick)),
+      ),
+    ) || null
   );
 }
 
-function mentionOrNick(guild, charName) {
-  const member = findMember(guild, charName);
-  return member ? `<@${member.id}>` : charName;
+function gatheringMoment(gathering) {
+  return Number(gathering?.timeAt || gathering?.closedAt || gathering?.startedAt || 0);
+}
+
+function listKnownGatherings(settings) {
+  const items = [];
+  const seen = new Set();
+  for (const gathering of [settings.gatherings?.active, ...(settings.gatherings?.history || [])]) {
+    if (!gathering?.id || seen.has(gathering.id)) continue;
+    seen.add(gathering.id);
+    items.push(gathering);
+  }
+  return items;
+}
+
+function pickGatheringForEvent(settings, event) {
+  const eventAt = new Date(event.startedAt).getTime();
+  if (!eventAt) return { main: [], bench: [] };
+
+  let best = null;
+  let bestDiff = Infinity;
+  for (const gathering of listKnownGatherings(settings)) {
+    const at = gatheringMoment(gathering);
+    if (!at) continue;
+    const diff = Math.abs(at - eventAt);
+    if (diff < bestDiff) {
+      best = gathering;
+      bestDiff = diff;
+    }
+  }
+  if (best && bestDiff <= MATCH_WINDOW_MS) return best;
+  return { main: [], bench: [] };
 }
 
 function ourSidePlayers(event) {
   if (isOurFamily(event.attackerName)) return event.attackers || [];
   if (isOurFamily(event.defenderName)) return event.defenders || [];
   return [];
+}
+
+function extraLine(item) {
+  if (item.kind === 'reserve') return `${item.charName} · <@${item.member.id}> — из резерва`;
+  if (item.kind === 'unlisted') return `${item.charName} · <@${item.member.id}> — не из списка`;
+  return `${item.charName} — никто не привязан к участнику`;
+}
+
+function rosterLine(guild, player, index) {
+  const member = findMember(guild, player.charName);
+  return member
+    ? `${index + 1}. <@${member.id}> · ${player.charName}`
+    : `${index + 1}. ${player.charName}`;
 }
 
 function buildVzpCard(guild, gathering, event, options = {}) {
@@ -132,8 +197,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   const benchSet = new Set(bench);
   const inTerra = ourSidePlayers(event);
   const inTerraIds = new Set();
-  const fromReserve = [];
-  const notFromList = [];
+  const extras = [];
 
   for (const player of inTerra) {
     const member = findMember(guild, player.charName);
@@ -141,12 +205,12 @@ function buildVzpCard(guild, gathering, event, options = {}) {
       inTerraIds.add(member.id);
     } else if (member && benchSet.has(member.id)) {
       inTerraIds.add(member.id);
-      fromReserve.push(member.id);
+      extras.push({ charName: player.charName, member, kind: 'reserve' });
     } else if (member) {
       inTerraIds.add(member.id);
-      notFromList.push(player.charName);
+      extras.push({ charName: player.charName, member, kind: 'unlisted' });
     } else {
-      notFromList.push(player.charName);
+      extras.push({ charName: player.charName, member: null, kind: 'unbound' });
     }
   }
 
@@ -156,32 +220,27 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   const finished = event.isAttackerWin !== null && event.isAttackerWin !== undefined;
   const weWon = finished && isOurFamily(event.winnerName);
   const side = weAttack ? 'Атака' : 'Защита';
-  const point = event.pointName || 'карта';
+  const place = mapName(event.map);
   const title = finished
-    ? `${weWon ? '🏆 ПОБЕДА' : '❌ ПОРАЖЕНИЕ'} — ${point} (${side})`
-    : `⏳ В ПРОЦЕССЕ — ${point} (${side})`;
+    ? `${weWon ? '🏆 ПОБЕДА' : '❌ ПОРАЖЕНИЕ'} — ${place} (${side})`
+    : `⏳ В ПРОЦЕССЕ — ${place} (${side})`;
   const maxPlayers = event.maxPlayers || inTerra.length || gathering.maxMain || 0;
-  const threadLine = gathering.threadId
-    ? `<#${gathering.threadId}>`
-    : 'неизвестно';
+  const gatheringLine = gathering.id
+    ? `Сбор: **${gathering.title || gathering.content || 'сбор'}**` +
+      (gathering.threadId ? ` · ветка: <#${gathering.threadId}>` : '')
+    : 'Сбор не найден по времени этого матча';
 
   const notes = [];
-  if (fromReserve.length) {
-    notes.push(
-      fromReserve.map((id) => `<@${id}> — из резерва`).join('\n'),
-    );
-  }
-  if (notFromList.length) {
-    notes.push(notFromList.map((nick) => `${nick} — не из списка`).join('\n'));
+  if (extras.length) {
+    notes.push(`**Зашли не из списка (${extras.length})**`);
+    notes.push(...extras.map(extraLine));
   }
   if (missedMain.length) {
     notes.push(`Из основы не зашли: **${missedMain.length}**`);
   }
 
   const roster = inTerra.length
-    ? inTerra
-        .map((player, index) => `${index + 1}. ${mentionOrNick(guild, player.charName)}`)
-        .join('\n')
+    ? inTerra.map((player, index) => rosterLine(guild, player, index)).join('\n')
     : '_Пока нет состава с мониторинга._';
   const reserve = bench.length
     ? bench.map((id, index) => `${index + 1}. <@${id}>`).join('\n')
@@ -193,8 +252,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     .setDescription(
       truncate(
         `**${FAMILY_NAME}** vs **${opponent || '—'}**\n` +
-          `Матч начат: **${event.attackerName || '—'}**\n` +
-          `Список перенесён в ветку: ${threadLine}\n` +
+          `${gatheringLine}\n` +
           (notes.length ? `\n${notes.join('\n')}\n` : '\n') +
           `\n**Состав ${inTerra.length}/${maxPlayers}** · ${finished ? 'Завершён' : 'Идёт'}\n` +
           `${roster}`,
@@ -336,7 +394,7 @@ async function publishManualVzpStats(client, guildId, eventId) {
 
   const guild = await client.guilds.fetch(guildId);
   await guild.members.fetch().catch(() => null);
-  const gathering = settings.gatherings?.active || { main: [], bench: [] };
+  const gathering = pickGatheringForEvent(settings, event);
   return channel.send(buildVzpCard(guild, gathering, event, { manual: true }));
 }
 
