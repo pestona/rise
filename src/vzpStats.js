@@ -78,6 +78,11 @@ function formatEventTime(startedAt) {
   }).format(new Date(startedAt));
 }
 
+function formatEventWhen(startedAt) {
+  if (!startedAt) return '—';
+  return `${formatDayLabel(eventDay(startedAt))} в ${formatEventTime(startedAt)}`;
+}
+
 function opponentName(event) {
   return isOurFamily(event.attackerName) ? event.defenderName : event.attackerName;
 }
@@ -278,6 +283,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     .setDescription(
       truncate(
         `**${FAMILY_NAME}** vs **${opponent || '—'}**\n` +
+          `Когда: **${formatEventWhen(event.startedAt)}**\n` +
           `${gatheringLine}\n` +
           (notes.length ? `\n${notes.join('\n')}\n` : '\n') +
           `\n**Состав ${inTerra.length}/${maxPlayers}** · ${finished ? 'Завершён' : 'Идёт'}\n` +
