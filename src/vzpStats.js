@@ -288,13 +288,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     .addFields({
       name: `Резерв · ${bench.length}`,
       value: truncate(reserve, 1024),
-    })
-    .setFooter({
-      text: options.manual
-        ? 'ТЕСТ · выбран вручную · vzp-gta5rp.com'
-        : 'BETA · данные с vzp-gta5rp.com + список сбора',
-    })
-    .setTimestamp(event.endedAt ? new Date(event.endedAt) : new Date(event.startedAt));
+    });
 
   return {
     embeds: [embed],
