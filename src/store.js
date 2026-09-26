@@ -64,6 +64,26 @@ function defaultGuild() {
       entries: [],
       logChannelId: null,
     },
+    archive: {
+      categoryId: null,
+      staffRoleIds: [],
+      createRoleIds: [],
+      rankRoleIds: [],
+      tierRoleIds: [],
+      publicTitle: 'Создать канал архива',
+      publicDescription:
+        '• В приватном канале с опытом оценят репшот — повыситься в ранг или порекомендовать дополнительную тренировку, указать ошибки.\n' +
+        '• В вашем канале также идёт рассмотрение вашего Tier, решения принимают уполномоченные роли.\n' +
+        '• Видеоматериалы желательно заливать на видеохостинги YouTube / Rutube.',
+      publicButton: 'Создать канал',
+      roomTitle: 'Личный канал архива',
+      roomDescription:
+        '• Отправляйте видео-откаты с МП в текстовый канал (желательно геймплей 10+ минут, без сильного лобби).\n' +
+        '• Изучайте завалы — это важно для участия в основном составе на каптах.\n' +
+        '• Прикрепляйте откаты с лучшей стрельбой и демонстрацией понимания игры.',
+      threadNames: ['RP мероприятия', 'Капт/мцид', 'Арена'],
+      channels: [],
+    },
     positions: {
       imageUrl: '',
       slotCount: 10,
@@ -103,6 +123,8 @@ function defaultGuild() {
         positionModerate: [],
         panelsPublish: [],
         settingsManage: [],
+        archiveCreate: [],
+        archiveManage: [],
       },
     },
     panel: { channelId: null, messageId: null },
@@ -291,6 +313,25 @@ function getGuild(guildId) {
     if (!Object.hasOwn(access.roles, access.selectedAction)) {
       access.selectedAction = 'gatheringCreate';
       dirty = true;
+    }
+    if (!db.settings.guilds[guildId].archive) {
+      db.settings.guilds[guildId].archive = defaultGuild().archive;
+      dirty = true;
+    } else {
+      const archive = db.settings.guilds[guildId].archive;
+      const defaults = defaultGuild().archive;
+      for (const key of ['staffRoleIds', 'createRoleIds', 'rankRoleIds', 'tierRoleIds', 'threadNames', 'channels']) {
+        if (!Array.isArray(archive[key])) {
+          archive[key] = defaults[key];
+          dirty = true;
+        }
+      }
+      for (const key of ['publicTitle', 'publicDescription', 'publicButton', 'roomTitle', 'roomDescription']) {
+        if (!archive[key]) {
+          archive[key] = defaults[key];
+          dirty = true;
+        }
+      }
     }
     if (!db.settings.guilds[guildId].afk) {
       db.settings.guilds[guildId].afk = defaultGuild().afk;

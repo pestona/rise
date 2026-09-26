@@ -123,6 +123,11 @@ const PUBLIC_PANELS = [
     label: 'AFK',
     description: 'Уход в AFK с причиной и временем',
   },
+  {
+    key: 'archive',
+    label: 'Архив',
+    description: 'Личные каналы архива, тиры и ранги',
+  },
 ];
 
 function buildAdminHub(guild, botName) {
@@ -144,7 +149,8 @@ function buildAdminHub(guild, botName) {
         `Выбери раздел — у каждого своя настройка.\n\n` +
           `${mark(panelReady)} Панели  ·  ${mark(ticketReady)} Тикеты  ·  ` +
           `${mark(logsReady)} Логи  ·  ${mark(autoparkReady)} Автопарк  ·  ` +
-          `${mark(gatheringsReady)} Сборы  ·  ${mark(securityReady)} Защита`,
+          `${mark(gatheringsReady)} Сборы  ·  ${mark(securityReady)} Защита  ·  ` +
+          `${mark(Boolean(guild.archive?.categoryId))} Архив`,
       ),
     )
     .addSeparatorComponents((sep) => sep.setDivider(true).setSpacing(SeparatorSpacingSize.Small))
@@ -214,6 +220,11 @@ function buildAdminHub(guild, botName) {
           .setLabel('Доступ')
           .setEmoji('🔐')
           .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:archive')
+          .setLabel('Архив')
+          .setEmoji('📁')
+          .setStyle(ButtonStyle.Primary),
       ),
     );
 
@@ -225,6 +236,7 @@ function buildSummary(guild) {
     tickets: 'Заявки в семью',
     autopark: 'Автопарк',
     afk: 'AFK',
+    archive: 'Архив',
     gatherings: 'Сборы',
   };
   const published = (guild.panels || []).length
@@ -273,6 +285,10 @@ function buildSummary(guild) {
     `### Тикеты\n` +
     `Персонал: ${roleMentions(guild.staffRoleIds)}\n` +
     `${typeSummary('vzp')}\n${typeSummary('rp')}\n\n` +
+    `### Архив\n` +
+    `Категория: ${channelMention(guild.archive?.categoryId)}\n` +
+    `Решения: ${roleMentions(guild.archive?.staffRoleIds)}\n` +
+    `Каналов: **${(guild.archive?.channels || []).length}**\n\n` +
     `### Общие логи\n` +
     `Выходы: ${channelMention(guild.logs?.leaveChannelId)}\n` +
     `Кики/баны: ${channelMention(guild.logs?.moderationChannelId)}\n` +
@@ -1391,6 +1407,165 @@ function buildAfkList(guild) {
   return container;
 }
 
+function archiveDate(timestamp) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(timestamp || Date.now()));
+}
+
+function archiveOwnedRole(member, roleIds) {
+  if (!member) return null;
+  return [...(roleIds || [])]
+    .sort((left, right) => (member.guild.roles.cache.get(right)?.position || 0) - (member.guild.roles.cache.get(left)?.position || 0))
+    .find((roleId) => member.roles.cache.has(roleId)) || null;
+}
+
+function buildArchivePanel(guild) {
+  const archive = guild.archive || {};
+  const container = new ContainerBuilder().setAccentColor(0x000000);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(`## ${archive.publicTitle || 'Создать канал архива'}\n${archive.publicDescription || ''}`),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('arch:create')
+          .setLabel(archive.publicButton || 'Создать канал')
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  return container;
+}
+
+function buildArchiveRoom(guild, member, entry) {
+  const archive = guild.archive || {};
+  const rankId = archiveOwnedRole(member, archive.rankRoleIds);
+  const tierId = archiveOwnedRole(member, archive.tierRoleIds);
+  const container = new ContainerBuilder().setAccentColor(0x000000);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## ${archive.roomTitle || 'Личный канал архива'}\n` +
+          `Личный канал участника — <@${entry.userId}>\n` +
+          `${archive.roomDescription || ''}\n\n` +
+          `**Текущий ранг:** ${rankId ? `<@&${rankId}>` : '—'}\n` +
+          `**Текущий тир:** ${tierId ? `<@&${tierId}>` : 'Нет тира'}\n` +
+          archiveDate(entry.createdAt),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`arch:act:${entry.userId}`)
+          .setPlaceholder('Взаимодействие с каналом')
+          .addOptions(
+            new StringSelectMenuOptionBuilder().setLabel('Удалить канал').setValue('delete').setEmoji('🗑️'),
+            new StringSelectMenuOptionBuilder().setLabel('Повышение ранга').setValue('rankup').setEmoji('⬆️'),
+            new StringSelectMenuOptionBuilder().setLabel('Понижение ранга').setValue('rankdown').setEmoji('⬇️'),
+          ),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`arch:tier:${entry.userId}`)
+          .setPlaceholder('Выдача тира')
+          .addOptions(
+            ...(archive.tierRoleIds || []).slice(0, 24).map((roleId, index) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(`Выдать тир ${index + 1}`)
+                .setValue(roleId)
+                .setEmoji('💠'),
+            ),
+            new StringSelectMenuOptionBuilder().setLabel('Снять тир').setValue('off').setEmoji('❌'),
+          ),
+      ),
+    );
+  return container;
+}
+
+function buildArchiveTab(guild) {
+  const archive = guild.archive || {};
+  const container = new ContainerBuilder().setAccentColor(0x000000);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Настройка архива\n` +
+          `Категория: ${channelMention(archive.categoryId)}\n` +
+          `Решения (тир/ранг): ${roleMentions(archive.staffRoleIds)}\n` +
+          `Кто может создать: ${archive.createRoleIds?.length ? roleMentions(archive.createRoleIds) : 'все'}\n` +
+          `Ранги (снизу вверх по позиции роли): ${roleMentions(archive.rankRoleIds)}\n` +
+          `Тиры: ${roleMentions(archive.tierRoleIds)}\n` +
+          `Ветки: ${(archive.threadNames || []).join(', ') || 'нет'}\n` +
+          `Каналов: **${(archive.channels || []).length}**`,
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Категория, куда создавать каналы**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:archcat')
+          .setPlaceholder('Категория архива')
+          .addChannelTypes(ChannelType.GuildCategory)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Кто принимает решения по тиру и рангу**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:archstaff')
+          .setPlaceholder('Уполномоченные роли')
+          .setMinValues(0)
+          .setMaxValues(25),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Кто может нажать «Создать канал»** (пусто = все)'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:archcreate')
+          .setPlaceholder('Роли для создания')
+          .setMinValues(0)
+          .setMaxValues(25),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Роли рангов**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:archranks')
+          .setPlaceholder('Роли рангов')
+          .setMinValues(0)
+          .setMaxValues(25),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Роли тиров** (порядок = тир 1, 2, 3…)'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:archtiers')
+          .setPlaceholder('Роли тиров')
+          .setMinValues(0)
+          .setMaxValues(3),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder().setCustomId('admin:archpub').setLabel('Текст панели').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('admin:archroom').setLabel('Текст канала').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('admin:archthreads').setLabel('Названия веток').setStyle(ButtonStyle.Secondary),
+        backToHubButton(),
+      ),
+    );
+  return container;
+}
+
 module.exports = {
   v2Flags,
   buildPublicPanel,
@@ -1416,4 +1591,7 @@ module.exports = {
   buildAfkList,
   buildAfkLog,
   formatAfkDuration,
+  buildArchivePanel,
+  buildArchiveRoom,
+  buildArchiveTab,
 };

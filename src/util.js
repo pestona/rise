@@ -10,6 +10,8 @@ const ACCESS_ACTIONS = {
   positionModerate: 'Модерация пика позиций',
   panelsPublish: 'Публикация панелей',
   settingsManage: 'Полная настройка /panel',
+  archiveCreate: 'Архив: создать канал',
+  archiveManage: 'Архив: тиры и ранги',
 };
 
 function isType(value) {

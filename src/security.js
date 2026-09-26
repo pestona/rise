@@ -182,6 +182,16 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
     if (settings.afk) {
       settings.afk.logChannelId = mapChannel(settings.afk.logChannelId);
     }
+    if (settings.archive) {
+      settings.archive.categoryId = mapChannel(settings.archive.categoryId);
+      settings.archive.staffRoleIds = (settings.archive.staffRoleIds || []).map(mapRole);
+      settings.archive.createRoleIds = (settings.archive.createRoleIds || []).map(mapRole);
+      settings.archive.rankRoleIds = (settings.archive.rankRoleIds || []).map(mapRole);
+      settings.archive.tierRoleIds = (settings.archive.tierRoleIds || []).map(mapRole);
+      settings.archive.channels = (settings.archive.channels || [])
+        .filter((item) => !recreatedChannelIds.has(item.channelId))
+        .map((item) => ({ ...item, channelId: mapChannel(item.channelId) }));
+    }
     if (settings.gatherings) {
       settings.gatherings.listChannelId = mapChannel(settings.gatherings.listChannelId);
       settings.gatherings.statsChannelId = mapChannel(settings.gatherings.statsChannelId);

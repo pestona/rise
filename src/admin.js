@@ -43,10 +43,12 @@ const {
   buildTicketTab,
   buildTypePage,
   buildDeleteQuestionMenu,
+  buildArchiveTab,
 } = require('./ui');
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
 const { publishAfkPanel } = require('./afk');
+const { publishArchivePanel, refreshArchivePanels } = require('./archive');
 const { closeActiveGathering, refreshGatheringPanels, ensureGatheringThread } = require('./gatherings');
 const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
@@ -189,6 +191,7 @@ function adminPayload(interaction, page) {
   else if (page === 'logs') container = buildLogsTab(guild);
   else if (page === 'autopark') container = buildAutoparkTab(guild);
   else if (page === 'gatherings') container = buildGatheringsTab(guild);
+  else if (page === 'archive') container = buildArchiveTab(guild);
   else if (page === 'access') container = buildAccessTab(guild);
   else if (page.startsWith('activity')) {
     const period = page.split(':')[1] || 'week';
@@ -544,6 +547,84 @@ function textModal(guild) {
     );
 }
 
+function archivePublicModal(archive) {
+  return new ModalBuilder()
+    .setCustomId('admin:archpub:modal')
+    .setTitle('Текст панели архива')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('title')
+          .setLabel('Заголовок')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80)
+          .setValue(truncate(archive.publicTitle || 'Создать канал архива', 80)),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('description')
+          .setLabel('Описание')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(1800)
+          .setValue(truncate(archive.publicDescription || '', 1800)),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('button')
+          .setLabel('Текст кнопки')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80)
+          .setValue(truncate(archive.publicButton || 'Создать канал', 80)),
+      ),
+    );
+}
+
+function archiveRoomModal(archive) {
+  return new ModalBuilder()
+    .setCustomId('admin:archroom:modal')
+    .setTitle('Текст личного канала')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('title')
+          .setLabel('Заголовок')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80)
+          .setValue(truncate(archive.roomTitle || 'Личный канал архива', 80)),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('description')
+          .setLabel('Описание')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(1800)
+          .setValue(truncate(archive.roomDescription || '', 1800)),
+      ),
+    );
+}
+
+function archiveThreadsModal(archive) {
+  return new ModalBuilder()
+    .setCustomId('admin:archthreads:modal')
+    .setTitle('Названия веток')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('names')
+          .setLabel('По одному названию на строку')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(400)
+          .setValue(truncate((archive.threadNames || []).join('\n'), 400)),
+      ),
+    );
+}
+
 function cooldownModal(days) {
   return new ModalBuilder()
     .setCustomId('admin:cooldown:modal')
@@ -844,6 +925,7 @@ async function handleAdminButton(interaction) {
   if (action === 'tab' && arg === 'autopark') return showAdmin(interaction, 'autopark');
   if (action === 'tab' && arg === 'summary') return showAdmin(interaction, 'summary');
   if (action === 'tab' && arg === 'gatherings') return showAdmin(interaction, 'gatherings');
+  if (action === 'tab' && arg === 'archive') return showAdmin(interaction, 'archive');
   if (action === 'tab' && arg === 'activity') return showAdmin(interaction, 'activity:week');
   if (action === 'tab' && arg === 'access') return showAdmin(interaction, 'access');
   if (action === 'tab' && arg === 'security') return showAdmin(interaction, 'security');
@@ -1063,6 +1145,16 @@ async function handleAdminButton(interaction) {
     return showAdmin(interaction, arg);
   }
 
+  if (action === 'archpub') {
+    return interaction.showModal(archivePublicModal(store.getGuild(interaction.guildId).archive || {}));
+  }
+  if (action === 'archroom') {
+    return interaction.showModal(archiveRoomModal(store.getGuild(interaction.guildId).archive || {}));
+  }
+  if (action === 'archthreads') {
+    return interaction.showModal(archiveThreadsModal(store.getGuild(interaction.guildId).archive || {}));
+  }
+
   if (action === 'banner') return interaction.showModal(bannerModal(store.getGuild(interaction.guildId).bannerUrl));
   if (action === 'text') return interaction.showModal(textModal(store.getGuild(interaction.guildId)));
   if (action === 'cooldown') {
@@ -1268,6 +1360,40 @@ async function handleAdminSelect(interaction) {
     return handleVzpEventPick(interaction);
   }
 
+  if (action === 'archcat') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.categoryId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'archive');
+  }
+
+  if (action === 'archstaff') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.staffRoleIds = [...interaction.values];
+    });
+    return showAdmin(interaction, 'archive');
+  }
+
+  if (action === 'archcreate') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.createRoleIds = [...interaction.values];
+    });
+    return showAdmin(interaction, 'archive');
+  }
+
+  if (action === 'archranks' || action === 'archtiers') {
+    const ordered = [...interaction.values].sort((left, right) => {
+      const a = interaction.guild.roles.cache.get(left)?.position || 0;
+      const b = interaction.guild.roles.cache.get(right)?.position || 0;
+      return a - b;
+    });
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (action === 'archranks') guild.archive.rankRoleIds = ordered;
+      else guild.archive.tierRoleIds = ordered;
+    });
+    return showAdmin(interaction, 'archive');
+  }
+
   if (action === 'gathstats') {
     store.updateGuild(interaction.guildId, (guild) => {
       guild.gatherings.statsChannelId = interaction.values[0] || null;
@@ -1310,7 +1436,9 @@ async function handleAdminSelect(interaction) {
           ? await publishAutoparkPanel(interaction, channel)
           : panelKey === 'afk'
             ? await publishAfkPanel(interaction, channel)
-            : await publishPanel(interaction, channel);
+            : panelKey === 'archive'
+              ? await publishArchivePanel(interaction, channel)
+              : await publishPanel(interaction, channel);
       await interaction.update(adminPayload(interaction, 'panels'));
       await interaction.followUp({
         content: result.edited ? `Панель обновлена в ${channel}.` : `Панель опубликована в ${channel}.`,
@@ -1526,6 +1654,40 @@ async function handleAdminModal(interaction) {
     });
     await refreshAllPanels(interaction.client, interaction.guildId);
     return showAdmin(interaction, 'ticket');
+  }
+
+  if (action === 'archpub') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.publicTitle = interaction.fields.getTextInputValue('title').trim();
+      guild.archive.publicDescription = interaction.fields.getTextInputValue('description').trim();
+      guild.archive.publicButton = interaction.fields.getTextInputValue('button').trim();
+    });
+    await refreshArchivePanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'archive');
+  }
+
+  if (action === 'archroom') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.roomTitle = interaction.fields.getTextInputValue('title').trim();
+      guild.archive.roomDescription = interaction.fields.getTextInputValue('description').trim();
+    });
+    return showAdmin(interaction, 'archive');
+  }
+
+  if (action === 'archthreads') {
+    const names = interaction.fields
+      .getTextInputValue('names')
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    if (!names.length) {
+      return interaction.reply({ content: 'Нужно хотя бы одно название ветки.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.archive.threadNames = names;
+    });
+    return showAdmin(interaction, 'archive');
   }
 
   if (action === 'text') {
