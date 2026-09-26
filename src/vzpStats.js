@@ -122,11 +122,36 @@ function memberKeys(member) {
     .map(normalizeNick);
 }
 
-function findMember(guild, charName) {
+function firstNameKey(name) {
+  const part = String(name || '')
+    .trim()
+    .split(/[\s_|.\-]+/)[0] || '';
+  return normalizeNick(part);
+}
+
+function memberFirstNames(member) {
+  return [member.displayName, member.user?.globalName, member.user?.username]
+    .filter(Boolean)
+    .map(firstNameKey)
+    .filter(Boolean);
+}
+
+function findMember(guild, charName, preferredIds = null) {
   const key = normalizeNick(charName);
   if (!key) return null;
   const exact = guild.members.cache.find((member) => memberKeys(member).includes(key));
   if (exact) return exact;
+
+  const first = firstNameKey(charName);
+  if (first.length >= 3) {
+    const byFirst = guild.members.cache.filter((member) => memberFirstNames(member).includes(first));
+    if (byFirst.size === 1) return byFirst.first();
+    if (byFirst.size > 1 && preferredIds) {
+      const preferred = byFirst.filter((member) => preferredIds.has(member.id));
+      if (preferred.size === 1) return preferred.first();
+    }
+  }
+
   if (key.length < 5) return null;
   return (
     guild.members.cache.find((member) =>
@@ -183,8 +208,8 @@ function extraLine(item) {
   return `${item.charName} — никто не привязан к участнику`;
 }
 
-function rosterLine(guild, player, index) {
-  const member = findMember(guild, player.charName);
+function rosterLine(guild, player, index, preferredIds) {
+  const member = findMember(guild, player.charName, preferredIds);
   return member
     ? `${index + 1}. <@${member.id}> · ${player.charName}`
     : `${index + 1}. ${player.charName}`;
@@ -195,12 +220,13 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   const bench = gathering.bench || [];
   const mainSet = new Set(main);
   const benchSet = new Set(bench);
+  const preferredIds = new Set([...main, ...bench]);
   const inTerra = ourSidePlayers(event);
   const inTerraIds = new Set();
   const extras = [];
 
   for (const player of inTerra) {
-    const member = findMember(guild, player.charName);
+    const member = findMember(guild, player.charName, preferredIds);
     if (member && mainSet.has(member.id)) {
       inTerraIds.add(member.id);
     } else if (member && benchSet.has(member.id)) {
@@ -240,7 +266,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   }
 
   const roster = inTerra.length
-    ? inTerra.map((player, index) => rosterLine(guild, player, index)).join('\n')
+    ? inTerra.map((player, index) => rosterLine(guild, player, index, preferredIds)).join('\n')
     : '_Пока нет состава с мониторинга._';
   const reserve = bench.length
     ? bench.map((id, index) => `${index + 1}. <@${id}>`).join('\n')
