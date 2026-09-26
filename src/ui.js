@@ -777,7 +777,8 @@ function buildGatheringsTab(guild) {
           `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}\n` +
           `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
-          `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}`,
+          `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n\n` +
+          `Тест статы: кнопка ниже → число → матч.`,
       ),
     )
     .addActionRowComponents((row) =>
@@ -787,6 +788,10 @@ function buildGatheringsTab(guild) {
           .setLabel('Завершить сбор')
           .setStyle(ButtonStyle.Danger)
           .setDisabled(!active),
+        new ButtonBuilder()
+          .setCustomId('admin:vzpstats')
+          .setLabel('Тест статы VZP')
+          .setStyle(ButtonStyle.Primary),
         backToHubButton(),
       ),
     )

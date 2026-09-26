@@ -1,4 +1,10 @@
-const { EmbedBuilder } = require('discord.js');
+const {
+  ActionRowBuilder,
+  EmbedBuilder,
+  MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+} = require('discord.js');
 const store = require('./store');
 const { truncate } = require('./util');
 
@@ -22,11 +28,49 @@ async function fetchJson(path) {
   return response.json();
 }
 
-async function listFamilyEvents() {
+async function listFamilyEvents(limit = 50) {
   const events = await fetchJson(
-    `/events?limit=20&offset=0&server_id=${SERVER_ID}&search=${encodeURIComponent(FAMILY_NAME)}`,
+    `/events?limit=${limit}&offset=0&server_id=${SERVER_ID}&search=${encodeURIComponent(FAMILY_NAME)}`,
   );
-  return Array.isArray(events) ? events : [];
+  return (Array.isArray(events) ? events : []).filter(
+    (event) =>
+      event.serverId === SERVER_ID &&
+      (isOurFamily(event.attackerName) || isOurFamily(event.defenderName)),
+  );
+}
+
+function eventDay(startedAt) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(startedAt));
+}
+
+function formatDayLabel(day) {
+  const [year, month, date] = String(day).split('-');
+  return `${date}.${month}.${year}`;
+}
+
+function formatEventTime(startedAt) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Kyiv',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(startedAt));
+}
+
+function opponentName(event) {
+  return isOurFamily(event.attackerName) ? event.defenderName : event.attackerName;
+}
+
+function eventOptionLabel(event) {
+  const mark = !event.endedAt ? 'идёт' : isOurFamily(event.winnerName) ? 'W' : 'L';
+  return truncate(
+    `${formatEventTime(event.startedAt)} ${mark} vs ${opponentName(event) || '—'} · ${event.pointName || 'карта'}`,
+    100,
+  );
 }
 
 async function getEvent(eventId) {
@@ -81,7 +125,7 @@ function ourSidePlayers(event) {
   return [];
 }
 
-function buildVzpCard(guild, gathering, event) {
+function buildVzpCard(guild, gathering, event, options = {}) {
   const main = gathering.main || [];
   const bench = gathering.bench || [];
   const mainSet = new Set(main);
@@ -161,7 +205,11 @@ function buildVzpCard(guild, gathering, event) {
       name: `Резерв · ${bench.length}`,
       value: truncate(reserve, 1024),
     })
-    .setFooter({ text: 'BETA · данные с vzp-gta5rp.com + список сбора' })
+    .setFooter({
+      text: options.manual
+        ? 'ТЕСТ · выбран вручную · vzp-gta5rp.com'
+        : 'BETA · данные с vzp-gta5rp.com + список сбора',
+    })
     .setTimestamp(event.endedAt ? new Date(event.endedAt) : new Date(event.startedAt));
 
   return {
@@ -275,7 +323,143 @@ async function publishVzpStats(client, guildId) {
   return event;
 }
 
+async function publishManualVzpStats(client, guildId, eventId) {
+  const settings = store.getGuild(guildId);
+  const channelId = settings.gatherings?.statsChannelId;
+  if (!channelId) throw new Error('no-channel');
+
+  const event = await getEvent(eventId);
+  if (!event) throw new Error('no-event');
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased()) throw new Error('no-channel');
+
+  const guild = await client.guilds.fetch(guildId);
+  await guild.members.fetch().catch(() => null);
+  const gathering = settings.gatherings?.active || { main: [], bench: [] };
+  return channel.send(buildVzpCard(guild, gathering, event, { manual: true }));
+}
+
+async function showVzpDatePicker(interaction) {
+  if (!store.getGuild(interaction.guildId).gatherings?.statsChannelId) {
+    return interaction.reply({
+      content: 'Сначала выбери канал VZP-статы в этой вкладке.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  let events;
+  try {
+    events = await listFamilyEvents();
+  } catch (error) {
+    return interaction.reply({
+      content: `Не удалось взять стату с сайта: ${error.message}`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const days = [...new Set(events.map((event) => eventDay(event.startedAt)))];
+  if (!days.length) {
+    return interaction.reply({
+      content: 'На сайте нет матчей RiseFam Chiliad.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (days.length === 1) {
+    return showVzpEventPicker(interaction, days[0], events, { reply: true });
+  }
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('admin:vzpdate')
+    .setPlaceholder('За какое число вывести стату?')
+    .addOptions(
+      days.slice(0, 25).map((day) => {
+        const count = events.filter((event) => eventDay(event.startedAt) === day).length;
+        return new StringSelectMenuOptionBuilder()
+          .setLabel(formatDayLabel(day))
+          .setDescription(`${count} матч.`)
+          .setValue(day);
+      }),
+    );
+
+  return interaction.reply({
+    content: 'Тест статы VZP. Сначала выбери число.',
+    components: [new ActionRowBuilder().setComponents(menu)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function showVzpEventPicker(interaction, day, events, options = {}) {
+  const list = (events || (await listFamilyEvents())).filter(
+    (event) => eventDay(event.startedAt) === day,
+  );
+  if (!list.length) {
+    const payload = {
+      content: `За ${formatDayLabel(day)} матчей RiseFam нет.`,
+      components: [],
+    };
+    return options.reply
+      ? interaction.reply({ ...payload, flags: MessageFlags.Ephemeral })
+      : interaction.update(payload);
+  }
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('admin:vzpevent')
+    .setPlaceholder(`Какой матч за ${formatDayLabel(day)}?`)
+    .addOptions(
+      list.slice(0, 25).map((event) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(eventOptionLabel(event))
+          .setDescription(truncate(`${event.maxPlayers || '?'} чел. · ${event.pointName || 'карта'}`, 100))
+          .setValue(event.eventId),
+      ),
+    );
+
+  const payload = {
+    content: `Число **${formatDayLabel(day)}**. Выбери матч — стату уйдёт в канал VZP.`,
+    components: [new ActionRowBuilder().setComponents(menu)],
+  };
+  return options.reply
+    ? interaction.reply({ ...payload, flags: MessageFlags.Ephemeral })
+    : interaction.update(payload);
+}
+
+async function handleVzpDatePick(interaction) {
+  const day = interaction.values[0];
+  try {
+    return await showVzpEventPicker(interaction, day);
+  } catch (error) {
+    return interaction.update({
+      content: `Не удалось взять стату с сайта: ${error.message}`,
+      components: [],
+    });
+  }
+}
+
+async function handleVzpEventPick(interaction) {
+  try {
+    await publishManualVzpStats(interaction.client, interaction.guildId, interaction.values[0]);
+  } catch (error) {
+    const text =
+      error.message === 'no-channel'
+        ? 'Сначала выбери канал VZP-статы.'
+        : error.message === 'no-event'
+          ? 'Этот матч на сайте уже не найден.'
+          : `Не удалось вывести стату: ${error.message}`;
+    return interaction.update({ content: text, components: [] });
+  }
+
+  return interaction.update({
+    content: 'Тестовая стата отправлена в канал VZP.',
+    components: [],
+  });
+}
+
 module.exports = {
   publishVzpStats,
   refreshVzpStats,
+  showVzpDatePicker,
+  handleVzpDatePick,
+  handleVzpEventPick,
 };

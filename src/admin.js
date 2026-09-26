@@ -48,6 +48,7 @@ const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
 const { publishAfkPanel } = require('./afk');
 const { closeActiveGathering, refreshGatheringPanels, ensureGatheringThread } = require('./gatherings');
+const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
 
@@ -1010,6 +1011,10 @@ async function handleAdminButton(interaction) {
     return showAdmin(interaction, 'gatherings');
   }
 
+  if (action === 'vzpstats') {
+    return showVzpDatePicker(interaction);
+  }
+
   if (action === 'gathclose') {
     const closed = await closeActiveGathering(interaction.client, interaction.guildId);
     if (!closed) {
@@ -1253,6 +1258,14 @@ async function handleAdminSelect(interaction) {
       guild.gatherings.listChannelId = interaction.values[0] || null;
     });
     return showAdmin(interaction, 'gatherings');
+  }
+
+  if (action === 'vzpdate') {
+    return handleVzpDatePick(interaction);
+  }
+
+  if (action === 'vzpevent') {
+    return handleVzpEventPick(interaction);
   }
 
   if (action === 'gathstats') {
