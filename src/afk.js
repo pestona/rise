@@ -12,7 +12,7 @@ const { buildAfkList, buildAfkLog, buildAfkPanel, formatAfkDuration, v2Flags } =
 const { truncate } = require('./util');
 
 const MIN_AFK_MS = 60_000;
-const MAX_AFK_MS = 24 * 60 * 60 * 1000;
+const MAX_AFK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function panelPayload(settings) {
   return {
@@ -30,6 +30,66 @@ function pruneExpired(guildId) {
     guild.afk.entries = (guild.afk.entries || []).filter((entry) => entry.endsAt > now);
   });
   return true;
+}
+
+function pad(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatUntilLabel(endsAt) {
+  const at = new Date(endsAt);
+  const now = new Date();
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay =
+    at.getDate() === now.getDate() &&
+    at.getMonth() === now.getMonth() &&
+    at.getFullYear() === now.getFullYear();
+  if (sameDay) return `до ${time}`;
+  return `до ${pad(at.getDate())}.${pad(at.getMonth() + 1)} ${time}`;
+}
+
+function withinAfkLimit(endsAt, now = Date.now()) {
+  const ms = endsAt - now;
+  return ms >= MIN_AFK_MS && ms <= MAX_AFK_MS;
+}
+
+function parseAfkTime(raw, now = new Date()) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+
+  const durationMs = parseAfkDuration(text);
+  if (durationMs) {
+    return { endsAt: now.getTime() + durationMs, label: formatAfkDuration(durationMs) };
+  }
+
+  const dateTime = text.match(/^(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?[ T]+(\d{1,2})[:.](\d{2})$/);
+  if (dateTime) {
+    const day = Number(dateTime[1]);
+    const month = Number(dateTime[2]) - 1;
+    let year = dateTime[3] ? Number(dateTime[3]) : now.getFullYear();
+    if (year < 100) year += 2000;
+    const hours = Number(dateTime[4]);
+    const minutes = Number(dateTime[5]);
+    if (month < 0 || month > 11 || day < 1 || day > 31 || hours > 23 || minutes > 59) return null;
+    const at = new Date(year, month, day, hours, minutes, 0, 0);
+    if (Number.isNaN(at.getTime()) || !withinAfkLimit(at.getTime(), now.getTime())) return null;
+    return { endsAt: at.getTime(), label: formatUntilLabel(at.getTime()) };
+  }
+
+  const timeOnly = text.match(/^(\d{1,2})[:.](\d{2})$/);
+  if (timeOnly) {
+    const hours = Number(timeOnly[1]);
+    const minutes = Number(timeOnly[2]);
+    if (hours > 23 || minutes > 59) return null;
+    const at = new Date(now);
+    at.setSeconds(0, 0);
+    at.setHours(hours, minutes, 0, 0);
+    if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+    if (!withinAfkLimit(at.getTime(), now.getTime())) return null;
+    return { endsAt: at.getTime(), label: formatUntilLabel(at.getTime()) };
+  }
+
+  return null;
 }
 
 function parseAfkDuration(raw) {
@@ -119,10 +179,19 @@ async function publishAfkPanel(interaction, channel) {
   return { edited: false, message };
 }
 
-function joinModal() {
+function resolveKind(value) {
+  return value === 'vacation' ? 'vacation' : 'afk';
+}
+
+function kindLabel(kind) {
+  return kind === 'vacation' ? 'отпуск' : 'AFK';
+}
+
+function joinModal(kind) {
+  const resolved = resolveKind(kind);
   return new ModalBuilder()
-    .setCustomId('afk:modal')
-    .setTitle('Уйти в AFK')
+    .setCustomId(`afk:modal:${resolved}`)
+    .setTitle(resolved === 'vacation' ? 'Уйти в отпуск' : 'Уйти в AFK')
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
@@ -131,34 +200,34 @@ function joinModal() {
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setMaxLength(200)
-          .setPlaceholder('Отойду на дела'),
+          .setPlaceholder(resolved === 'vacation' ? 'Отпуск / поездка' : 'Отойду на дела'),
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('time')
-          .setLabel('Время')
+          .setLabel('На сколько или до которого')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setMaxLength(20)
-          .setPlaceholder('15м или 1ч'),
+          .setMaxLength(32)
+          .setPlaceholder('15м, 23:00 или 23.09 23:00'),
       ),
     );
 }
 
 async function handleAfkButton(interaction) {
-  const action = interaction.customId.split(':')[1];
+  const [, action, kind] = interaction.customId.split(':');
   pruneExpired(interaction.guildId);
   const settings = store.getGuild(interaction.guildId);
   const current = (settings.afk?.entries || []).find((entry) => entry.userId === interaction.user.id);
 
   if (action === 'join') {
-    return interaction.showModal(joinModal());
+    return interaction.showModal(joinModal(kind));
   }
 
   if (action === 'leave') {
     if (!current) {
       return interaction.reply({
-        content: 'Вы не в AFK.',
+        content: 'Вы не в AFK и не в отпуске.',
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -166,7 +235,7 @@ async function handleAfkButton(interaction) {
       guild.afk.entries = guild.afk.entries.filter((entry) => entry.userId !== interaction.user.id);
     });
     await interaction.reply({
-      content: 'Вы вышли с AFK.',
+      content: current.kind === 'vacation' ? 'Вы вышли из отпуска.' : 'Вы вышли с AFK.',
       flags: MessageFlags.Ephemeral,
     });
     await refreshAfkPanels(interaction.client, interaction.guildId);
@@ -183,8 +252,9 @@ async function handleAfkButton(interaction) {
 }
 
 async function handleAfkModal(interaction) {
+  const kind = resolveKind(interaction.customId.split(':')[2]);
   const reason = truncate(interaction.fields.getTextInputValue('reason').trim(), 200);
-  const durationMs = parseAfkDuration(interaction.fields.getTextInputValue('time'));
+  const parsed = parseAfkTime(interaction.fields.getTextInputValue('time'));
 
   if (!reason) {
     return interaction.reply({
@@ -192,21 +262,21 @@ async function handleAfkModal(interaction) {
       flags: MessageFlags.Ephemeral,
     });
   }
-  if (!durationMs) {
+  if (!parsed) {
     return interaction.reply({
-      content: 'Время пишите так: `15м` или `1ч`. Минимум 1м, максимум 24ч.',
+      content: 'Время пишите так: `15м`, `1ч`, `23:00` или `23.09 23:00`. Минимум 1м, максимум 7 дней, и только будущее время.',
       flags: MessageFlags.Ephemeral,
     });
   }
 
   const now = Date.now();
-  const durationLabel = formatAfkDuration(durationMs);
   const entry = {
     userId: interaction.user.id,
+    kind,
     reason,
-    durationLabel,
+    durationLabel: parsed.label,
     startedAt: now,
-    endsAt: now + durationMs,
+    endsAt: parsed.endsAt,
   };
   store.updateGuild(interaction.guildId, (guild) => {
     guild.afk.entries = (guild.afk.entries || []).filter((item) => item.userId !== interaction.user.id);
@@ -214,7 +284,7 @@ async function handleAfkModal(interaction) {
   });
 
   await interaction.reply({
-    content: `Вы ушли в AFK на **${durationLabel}**. Причина: ${reason}`,
+    content: `Вы ушли в ${kindLabel(kind)} **${parsed.label}**. Причина: ${reason}`,
     flags: MessageFlags.Ephemeral,
   });
   await sendAfkLog(interaction.client, interaction.guildId, entry);
@@ -255,4 +325,5 @@ module.exports = {
   handleAfkModal,
   setupAfk,
   parseAfkDuration,
+  parseAfkTime,
 };
