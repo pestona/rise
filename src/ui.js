@@ -744,7 +744,12 @@ function buildGatheringList(guild, options = {}) {
       `**Время:** ${formatGatheringTime(active)}\n` +
         `**Контент:** ${content}\n` +
         `**Участников:** ${main.length}/${maxMain || '—'}` +
-        (closed && active?.threadId ? `\n**Ветка основы:** <#${active.threadId}>` : ''),
+        (closed && active?.threadId
+          ? `\n**Ветка основы:** <#${active.threadId}>` +
+            (active.threadDeleteAt
+              ? ` · удалится <t:${Math.floor(active.threadDeleteAt / 1000)}:R>`
+              : '')
+          : ''),
     )
     .addFields(
       {

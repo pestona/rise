@@ -388,6 +388,7 @@ function getGuild(guildId) {
             startedAt: gatherings.active.startedAt || null,
             closedAt: gatherings.active.closedAt || null,
             threadId: gatherings.active.threadId || null,
+            threadDeleteAt: gatherings.active.threadDeleteAt || null,
             channelId: gatherings.active.channelId || null,
             maxMain: gatherings.active.maxMain || 0,
             main: [...(gatherings.active.main || [])],

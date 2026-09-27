@@ -16,6 +16,7 @@ const { recordGathering } = require('./activity');
 const { publishVzpStats, refreshVzpStats } = require('./vzpStats');
 
 const MAX_ROSTER = 50;
+const THREAD_LIFETIME_MS = 2 * 60 * 60 * 1000;
 
 function panelPayload(settings) {
   return {
@@ -63,6 +64,7 @@ function snapshotGathering(gathering) {
     startedAt: gathering.startedAt || null,
     closedAt: gathering.closedAt || null,
     threadId: gathering.threadId || null,
+    threadDeleteAt: gathering.threadDeleteAt || null,
     channelId: gathering.channelId || null,
     maxMain: gathering.maxMain || 0,
     main: [...(gathering.main || [])],
@@ -258,18 +260,22 @@ async function createGatheringThread(client, guildId) {
     return null;
   }
 
+  const threadDeleteAt = Date.now() + THREAD_LIFETIME_MS;
   store.updateGuild(guildId, (guild) => {
     if (guild.gatherings.active?.id === gathering.id) {
       guild.gatherings.active.threadId = thread.id;
+      guild.gatherings.active.threadDeleteAt = threadDeleteAt;
     }
   });
 
   const main = gathering.main || [];
+  const deleteUnix = Math.floor(threadDeleteAt / 1000);
   await thread
     .send({
       content:
         `Ветка сбора **${gathering.content || gathering.title}**.\n` +
-        `В ветке только основа. Писать могут только выбранные роли.${main.length ? `\n${main.map((id) => `<@${id}>`).join(' ')}` : ''}`,
+        `В ветке только основа. Писать могут только выбранные роли.\n` +
+        `Ветка удалится сама <t:${deleteUnix}:R>.${main.length ? `\n${main.map((id) => `<@${id}>`).join(' ')}` : ''}`,
       allowedMentions: { users: main },
     })
     .catch(() => null);
@@ -691,7 +697,7 @@ async function handleGatheringAction(interaction) {
       return interaction.update({
         content: closed
           ? threadId
-            ? `Сбор завершён. Ветка основы: <#${threadId}>.`
+            ? `Сбор завершён. Ветка основы: <#${threadId}>. Удалится сама через 2 часа.`
             : 'Сбор завершён.'
           : 'Открытого сбора не было.',
         components: [],
@@ -702,7 +708,7 @@ async function handleGatheringAction(interaction) {
       const threadId = getGathering(interaction.guildId)?.threadId;
       return interaction.reply({
         content: threadId
-          ? `Сбор завершён. Ветка основы: <#${threadId}>.`
+          ? `Сбор завершён. Ветка основы: <#${threadId}>. Удалится сама через 2 часа.`
           : 'Сбор завершён. Ветку основы создать не удалось — проверьте право бота «Создавать приватные ветки».',
         flags: MessageFlags.Ephemeral,
       });
@@ -830,6 +836,75 @@ async function handleGatheringAction(interaction) {
   });
 }
 
+function gatheringThreadSources(gatherings) {
+  return [gatherings?.active, ...(gatherings?.history || [])].filter((item) => item?.threadId);
+}
+
+async function deleteExpiredGatheringThreads(client) {
+  const now = Date.now();
+  for (const guildId of store.getGuildIds()) {
+    const gatherings = store.getGuild(guildId).gatherings;
+    const items = gatheringThreadSources(gatherings);
+    if (!items.length) continue;
+
+    if (items.some((item) => !item.threadDeleteAt)) {
+      store.updateGuild(guildId, (guild) => {
+        const stamp = (item) => {
+          if (!item?.threadId || item.threadDeleteAt) return;
+          item.threadDeleteAt = (item.closedAt || now) + THREAD_LIFETIME_MS;
+        };
+        stamp(guild.gatherings.active);
+        for (const item of guild.gatherings.history || []) stamp(item);
+      });
+    }
+
+    const current = gatheringThreadSources(store.getGuild(guildId).gatherings);
+    const expired = [
+      ...new Map(
+        current
+          .filter((item) => item.threadDeleteAt && item.threadDeleteAt <= now)
+          .map((item) => [item.threadId, item]),
+      ).values(),
+    ];
+    if (!expired.length) continue;
+
+    const removed = new Set();
+    for (const item of expired) {
+      const thread = await client.channels.fetch(item.threadId).catch(() => null);
+      if (thread?.isThread()) {
+        const deleted = await thread.delete('Ветка сбора удалена через 2 часа').then(
+          () => true,
+          (error) => {
+            console.warn('Не удалось удалить ветку сбора:', error.message);
+            return false;
+          },
+        );
+        if (!deleted) continue;
+      }
+      removed.add(item.threadId);
+    }
+    if (!removed.size) continue;
+
+    let activeCleared = false;
+    store.updateGuild(guildId, (guild) => {
+      const clear = (item) => {
+        if (!item?.threadId || !removed.has(item.threadId)) return;
+        item.threadId = null;
+        item.threadDeleteAt = null;
+      };
+      if (guild.gatherings.active?.threadId && removed.has(guild.gatherings.active.threadId)) {
+        activeCleared = true;
+      }
+      clear(guild.gatherings.active);
+      for (const item of guild.gatherings.history || []) clear(item);
+    });
+
+    if (activeCleared) {
+      await refreshGatheringList(client, guildId, true).catch(() => null);
+    }
+  }
+}
+
 function setupGatheringThreadGuard(client) {
   client.on(Events.MessageCreate, async (message) => {
     if (!message.guildId || message.author.bot || !message.channel?.isThread()) return;
@@ -837,6 +912,11 @@ function setupGatheringThreadGuard(client) {
     if (settings.gatherings?.active?.threadId !== message.channelId) return;
     if (canWriteInGatheringThread(message.member, settings)) return;
     await message.delete().catch(() => null);
+  });
+
+  client.once(Events.ClientReady, () => {
+    deleteExpiredGatheringThreads(client).catch(console.error);
+    setInterval(() => deleteExpiredGatheringThreads(client).catch(console.error), 30_000);
   });
 }
 
