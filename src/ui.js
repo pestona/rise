@@ -656,9 +656,37 @@ function buildPositionsPanel(guild) {
   return { embeds: [embed], components: rows };
 }
 
-function numberedMentions(ids) {
+const TIER_MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
+function gatheringTier(member, tierRoleIds) {
+  if (!member || !tierRoleIds?.length) return 0;
+  let best = 0;
+  for (let index = 0; index < tierRoleIds.length; index += 1) {
+    if (!member.roles.cache.has(tierRoleIds[index])) continue;
+    const tier = index + 1;
+    if (!best || tier < best) best = tier;
+  }
+  return best;
+}
+
+function sortGatheringIds(ids, discordGuild, tierRoleIds) {
+  return [...ids].sort((left, right) => {
+    const leftTier = gatheringTier(discordGuild?.members?.cache.get(left), tierRoleIds) || 99;
+    const rightTier = gatheringTier(discordGuild?.members?.cache.get(right), tierRoleIds) || 99;
+    if (leftTier !== rightTier) return leftTier - rightTier;
+    return ids.indexOf(left) - ids.indexOf(right);
+  });
+}
+
+function numberedMentions(ids, discordGuild, tierRoleIds) {
   if (!ids?.length) return '_пока никого_';
-  return ids.map((id, index) => `${index + 1}. <@${id}>`).join('\n');
+  return sortGatheringIds(ids, discordGuild, tierRoleIds)
+    .map((id, index) => {
+      const tier = gatheringTier(discordGuild?.members?.cache.get(id), tierRoleIds);
+      const medal = TIER_MEDALS[tier];
+      return `${index + 1}. ${medal ? `${medal} ` : ''}<@${id}>`;
+    })
+    .join('\n');
 }
 
 function formatGatheringTime(active) {
@@ -706,6 +734,8 @@ function buildGatheringList(guild, options = {}) {
   const main = active?.main || [];
   const bench = active?.bench || [];
   const maxMain = active?.maxMain || 0;
+  const discordGuild = options.discordGuild || null;
+  const tierRoleIds = gatherings.tierRoleIds || [];
 
   const embed = new EmbedBuilder()
     .setColor(0x95a5a6)
@@ -719,12 +749,12 @@ function buildGatheringList(guild, options = {}) {
     .addFields(
       {
         name: `Основа · ${main.length}/${maxMain || '—'}`,
-        value: truncate(numberedMentions(main), 1024),
+        value: truncate(numberedMentions(main, discordGuild, tierRoleIds), 1024),
         inline: true,
       },
       {
         name: `Замена · ${bench.length}`,
-        value: truncate(numberedMentions(bench), 1024),
+        value: truncate(numberedMentions(bench, discordGuild, tierRoleIds), 1024),
         inline: true,
       },
     );
@@ -777,7 +807,8 @@ function buildGatheringsTab(guild) {
           `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}\n` +
           `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
-          `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n\n` +
+          `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n` +
+          `Тиры в списке: ${roleMentions(gatherings.tierRoleIds) || 'не выбраны'} (🥇 → 🥈 → 🥉 → без тира)\n\n` +
           `Тест статы: кнопка ниже → число → матч.`,
       ),
     )
@@ -818,6 +849,18 @@ function buildGatheringsTab(guild) {
           .setPlaceholder('Выберите одну или несколько ролей')
           .setMinValues(0)
           .setMaxValues(25),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Роли тиров** (выше роль = тир 1 🥇, дальше 🥈 и 🥉). Без тира — внизу списка.'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:gathtiers')
+          .setPlaceholder('Тир 1, тир 2, тир 3')
+          .setMinValues(0)
+          .setMaxValues(3),
       ),
     );
 
@@ -1419,6 +1462,7 @@ module.exports = {
   buildGatheringPanel,
   buildGatheringList,
   buildGatheringsTab,
+  numberedMentions,
   buildActivityTab,
   buildActivityUserTab,
   buildAccessTab,

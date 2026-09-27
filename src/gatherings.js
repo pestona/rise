@@ -10,7 +10,7 @@ const {
   UserSelectMenuBuilder,
 } = require('discord.js');
 const store = require('./store');
-const { buildGatheringList, buildGatheringPanel } = require('./ui');
+const { buildGatheringList, buildGatheringPanel, numberedMentions } = require('./ui');
 const { hasAccess, shortId, truncate } = require('./util');
 const { recordGathering } = require('./activity');
 const { publishVzpStats, refreshVzpStats } = require('./vzpStats');
@@ -24,11 +24,21 @@ function panelPayload(settings) {
   };
 }
 
-function listPayload(settings, closed = false, frozen = false) {
+function listPayload(settings, closed = false, frozen = false, discordGuild = null) {
   return {
-    ...buildGatheringList(settings, { closed, frozen }),
+    ...buildGatheringList(settings, { closed, frozen, discordGuild }),
     allowedMentions: { parse: [] },
   };
+}
+
+async function loadRosterGuild(client, guildId, gathering) {
+  const discordGuild = client.guilds.cache.get(guildId) || (await client.guilds.fetch(guildId).catch(() => null));
+  if (!discordGuild) return null;
+  const userIds = [...new Set([...(gathering?.main || []), ...(gathering?.bench || [])])];
+  if (userIds.length) {
+    await discordGuild.members.fetch({ user: userIds }).catch(() => null);
+  }
+  return discordGuild;
 }
 
 function canManage(member, settings) {
@@ -127,7 +137,8 @@ async function refreshGatheringList(client, guildId, closed = false, frozen = fa
   try {
     const channel = await client.channels.fetch(gathering.channelId);
     const message = await channel.messages.fetch(gathering.messageId);
-    await message.edit(listPayload(settings, closed || Boolean(gathering.closed), frozen));
+    const discordGuild = await loadRosterGuild(client, guildId, gathering);
+    await message.edit(listPayload(settings, closed || Boolean(gathering.closed), frozen, discordGuild));
   } catch (error) {
     if (error.code !== 10008) {
       console.warn('Не удалось обновить список сбора:', error.message);
@@ -430,7 +441,8 @@ function sendEphemeralView(interaction, payload) {
 }
 
 function moderationHomePayload(guild, notice = '') {
-  const active = store.getGuild(guild.id).gatherings?.active;
+  const settings = store.getGuild(guild.id);
+  const active = settings.gatherings?.active;
   if (!active) {
     return {
       content: 'Списка сбора нет.',
@@ -444,12 +456,8 @@ function moderationHomePayload(guild, notice = '') {
   ];
   const listText = entries.length
     ? [
-        `**Основа (${active.main.length})**\n${
-          active.main.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || '_пусто_'
-        }`,
-        `**Замена (${active.bench.length})**\n${
-          active.bench.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || '_пусто_'
-        }`,
+        `**Основа (${active.main.length})**\n${numberedMentions(active.main, guild, settings.gatherings?.tierRoleIds)}`,
+        `**Замена (${active.bench.length})**\n${numberedMentions(active.bench, guild, settings.gatherings?.tierRoleIds)}`,
       ].join('\n\n')
     : '_Список пуст._';
 
@@ -641,7 +649,7 @@ async function handleGatheringCommand(interaction) {
     guild.gatherings.active = gathering;
   });
 
-  const payload = listPayload(store.getGuild(interaction.guildId));
+  const payload = listPayload(store.getGuild(interaction.guildId), false, false, interaction.guild);
   const mentions = [
     pingEveryone ? '@everyone' : null,
     ...pingRoleIds.map((roleId) => `<@&${roleId}>`),
@@ -835,6 +843,7 @@ function setupGatheringThreadGuard(client) {
 module.exports = {
   publishGatheringPanel,
   refreshGatheringPanels,
+  refreshGatheringList,
   closeActiveGathering,
   handleGatheringAction,
   handleGatheringCommand,

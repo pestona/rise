@@ -47,7 +47,7 @@ const {
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
 const { publishAfkPanel } = require('./afk');
-const { closeActiveGathering, refreshGatheringPanels, ensureGatheringThread } = require('./gatherings');
+const { closeActiveGathering, refreshGatheringPanels, refreshGatheringList, ensureGatheringThread } = require('./gatherings');
 const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
@@ -1280,6 +1280,19 @@ async function handleAdminSelect(interaction) {
       guild.gatherings.threadRoleIds = [...interaction.values];
     });
     await ensureGatheringThread(interaction.client, interaction.guildId).catch(() => null);
+    return showAdmin(interaction, 'gatherings');
+  }
+
+  if (action === 'gathtiers') {
+    const ordered = [...interaction.values].sort((left, right) => {
+      const a = interaction.guild.roles.cache.get(left)?.position || 0;
+      const b = interaction.guild.roles.cache.get(right)?.position || 0;
+      return b - a;
+    });
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.gatherings.tierRoleIds = ordered;
+    });
+    await refreshGatheringList(interaction.client, interaction.guildId).catch(() => null);
     return showAdmin(interaction, 'gatherings');
   }
 

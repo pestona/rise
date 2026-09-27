@@ -73,6 +73,7 @@ function defaultGuild() {
       listChannelId: null,
       statsChannelId: null,
       threadRoleIds: [],
+      tierRoleIds: [],
       selectedPresetId: 'mp',
       presets: [
         { id: 'family', name: 'Семейный сбор', description: 'Общий сбор семьи' },
@@ -334,6 +335,10 @@ function getGuild(guildId) {
       }
       if (!Array.isArray(gatherings.threadRoleIds)) {
         gatherings.threadRoleIds = [];
+        dirty = true;
+      }
+      if (!Array.isArray(gatherings.tierRoleIds)) {
+        gatherings.tierRoleIds = [];
         dirty = true;
       }
       if (!Array.isArray(gatherings.presets) || !gatherings.presets.length) {
