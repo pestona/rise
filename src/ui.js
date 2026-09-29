@@ -1405,24 +1405,21 @@ function formatAfkSection(title, entries) {
 
 function buildAfkPanel(guild) {
   const entries = activeAfkEntries(guild);
-  const afkCount = entries.filter((entry) => afkKind(entry) === 'afk').length;
-  const vacationCount = entries.filter((entry) => afkKind(entry) === 'vacation').length;
+  const afkEntries = entries.filter((entry) => afkKind(entry) === 'afk');
+  const vacationEntries = entries.filter((entry) => afkKind(entry) === 'vacation');
+  const intro =
+    `## AFK / Отпуск\n` +
+    `Уйдите в AFK или отпуск с указанием причины и времени.\n` +
+    `По истечении срока вы автоматически пропадёте из списка.\n\n`;
+  const list = `${formatAfkSection('AFK', afkEntries)}\n\n${formatAfkSection('Отпуск', vacationEntries)}`;
   const container = new ContainerBuilder().setAccentColor(0x000000);
   container
-    .addTextDisplayComponents((text) =>
-      text.setContent(
-        `## AFK / Отпуск\n` +
-          `Уйдите в AFK или отпуск с указанием причины и времени.\n` +
-          `По истечении срока вы автоматически пропадёте из списка.\n\n` +
-          `Сейчас в AFK: **${afkCount}** · в отпуске: **${vacationCount}**`,
-      ),
-    )
+    .addTextDisplayComponents((text) => text.setContent(truncate(`${intro}${list}`, 3900)))
     .addActionRowComponents((row) =>
       row.setComponents(
         new ButtonBuilder().setCustomId('afk:join:afk').setLabel('Уйти в AFK').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('afk:join:vacation').setLabel('Уйти в отпуск').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('afk:leave').setLabel('Выйти').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('afk:list').setLabel('Список').setStyle(ButtonStyle.Secondary),
       ),
     );
   return container;
