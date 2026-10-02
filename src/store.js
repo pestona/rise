@@ -384,7 +384,9 @@ function getGuild(guildId) {
           gatherings.history.unshift({
             id: gatherings.active.id,
             title: gatherings.active.content || gatherings.active.title,
+            content: gatherings.active.content || gatherings.active.title,
             timeAt: gatherings.active.timeAt || null,
+            vzpEventId: gatherings.active.vzpEventId || null,
             startedAt: gatherings.active.startedAt || null,
             closedAt: gatherings.active.closedAt || null,
             threadId: gatherings.active.threadId || null,

@@ -11,7 +11,7 @@ const { truncate } = require('./util');
 const API = 'https://vzp-gta5rp.com/api';
 const FAMILY_NAME = 'RiseFam';
 const SERVER_ID = 25;
-const MATCH_WINDOW_MS = 3 * 60 * 60 * 1000;
+const SIDE_WINDOW_MS = 90 * 60 * 1000;
 const watchers = new Map();
 
 const MAP_NAMES = {
@@ -104,21 +104,68 @@ function isOurFamily(name) {
   return normalizeNick(name) === normalizeNick(FAMILY_NAME);
 }
 
+function eventSide(event) {
+  if (isOurFamily(event?.attackerName)) return 'attack';
+  if (isOurFamily(event?.defenderName)) return 'defense';
+  return null;
+}
+
+function gatheringSide(gathering) {
+  const text = String(`${gathering?.content || ''} ${gathering?.title || ''}`)
+    .toLowerCase()
+    .replace(/ё/g, 'е');
+  const attackAt = text.search(/аттаск|атт|att/);
+  const defenseAt = text.search(/дефф|deff/);
+  if (attackAt === -1 && defenseAt === -1) return null;
+  if (attackAt === -1) return 'defense';
+  if (defenseAt === -1) return 'attack';
+  return attackAt <= defenseAt ? 'attack' : 'defense';
+}
+
+function gatheringMoment(gathering) {
+  return Number(gathering?.timeAt || gathering?.closedAt || gathering?.startedAt || 0);
+}
+
+function sideMatches(gathering, event) {
+  const wanted = gatheringSide(gathering);
+  const actual = eventSide(event);
+  if (!wanted || !actual) return true;
+  return wanted === actual;
+}
+
+function pickClosest(items, at, timeOf) {
+  let best = null;
+  let bestDiff = Infinity;
+  for (const item of items) {
+    const itemAt = timeOf(item);
+    if (!itemAt) continue;
+    const diff = Math.abs(itemAt - at);
+    if (diff < bestDiff) {
+      best = item;
+      bestDiff = diff;
+    }
+  }
+  return bestDiff <= SIDE_WINDOW_MS ? best : null;
+}
+
 function pickEvent(events, gathering) {
-  const startedAt = Number(gathering.startedAt || 0);
-  const windowStart = startedAt - 15 * 60 * 1000;
+  if (gathering?.vzpEventId) {
+    const bound = events.find((event) => event.eventId === gathering.vzpEventId);
+    if (bound) return bound;
+  }
+
+  const at = gatheringMoment(gathering);
+  if (!at) return null;
   const ours = events.filter(
     (event) =>
       event.serverId === SERVER_ID &&
-      (isOurFamily(event.attackerName) || isOurFamily(event.defenderName)),
+      eventSide(event) &&
+      sideMatches(gathering, event),
   );
-  return (
-    ours.find((event) => !event.endedAt && new Date(event.startedAt).getTime() >= windowStart) ||
-    ours.find((event) => new Date(event.startedAt).getTime() >= windowStart) ||
-    ours.find((event) => !event.endedAt) ||
-    ours[0] ||
-    null
-  );
+  const sameSide = gatheringSide(gathering)
+    ? ours.filter((event) => eventSide(event) === gatheringSide(gathering))
+    : ours;
+  return pickClosest(sameSide, at, (event) => new Date(event.startedAt).getTime());
 }
 
 function memberKeys(member) {
@@ -167,10 +214,6 @@ function findMember(guild, charName, preferredIds = null) {
   );
 }
 
-function gatheringMoment(gathering) {
-  return Number(gathering?.timeAt || gathering?.closedAt || gathering?.startedAt || 0);
-}
-
 function listKnownGatherings(settings) {
   const items = [];
   const seen = new Set();
@@ -184,21 +227,22 @@ function listKnownGatherings(settings) {
 
 function pickGatheringForEvent(settings, event) {
   const eventAt = new Date(event.startedAt).getTime();
-  if (!eventAt) return { main: [], bench: [] };
+  const actual = eventSide(event);
+  if (!eventAt || !actual) return { main: [], bench: [] };
 
-  let best = null;
-  let bestDiff = Infinity;
+  const labeled = [];
+  const unlabeled = [];
   for (const gathering of listKnownGatherings(settings)) {
-    const at = gatheringMoment(gathering);
-    if (!at) continue;
-    const diff = Math.abs(at - eventAt);
-    if (diff < bestDiff) {
-      best = gathering;
-      bestDiff = diff;
-    }
+    const wanted = gatheringSide(gathering);
+    if (wanted && wanted !== actual) continue;
+    if (wanted === actual) labeled.push(gathering);
+    else unlabeled.push(gathering);
   }
-  if (best && bestDiff <= MATCH_WINDOW_MS) return best;
-  return { main: [], bench: [] };
+
+  return (
+    pickClosest(labeled, eventAt, gatheringMoment) ||
+    pickClosest(unlabeled, eventAt, gatheringMoment) || { main: [], bench: [] }
+  );
 }
 
 function ourSidePlayers(event) {
@@ -360,13 +404,27 @@ async function refreshVzpStats(client, guildId) {
   await guild.members.fetch().catch(() => null);
 
   try {
-    const events = await listFamilyEvents();
-    const summary = pickEvent(events, gathering);
-    if (!summary) {
-      await sendOrEditCard(client, gathering, waitingCard(gathering));
-      return null;
+    let event = gathering.vzpEventId ? await getEvent(gathering.vzpEventId) : null;
+    if (!event) {
+      const events = await listFamilyEvents();
+      const summary = pickEvent(events, gathering);
+      if (!summary) {
+        await sendOrEditCard(client, gathering, waitingCard(gathering));
+        return null;
+      }
+      event = (await getEvent(summary.eventId)) || summary;
+      if (event?.eventId && gathering.id) {
+        gathering.vzpEventId = event.eventId;
+        store.updateGuild(guildId, (guild) => {
+          if (guild.gatherings.active?.id === gathering.id) {
+            guild.gatherings.active.vzpEventId = event.eventId;
+          }
+          for (const item of guild.gatherings.history || []) {
+            if (item.id === gathering.id) item.vzpEventId = event.eventId;
+          }
+        });
+      }
     }
-    const event = (await getEvent(summary.eventId)) || summary;
     const payload = buildVzpCard(guild, gathering, event);
     await sendOrEditCard(client, gathering, payload);
     return event;

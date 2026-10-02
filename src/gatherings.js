@@ -60,7 +60,9 @@ function snapshotGathering(gathering) {
   return {
     id: gathering.id,
     title: gathering.content || gathering.title,
+    content: gathering.content || gathering.title,
     timeAt: gathering.timeAt || null,
+    vzpEventId: gathering.vzpEventId || null,
     startedAt: gathering.startedAt || null,
     closedAt: gathering.closedAt || null,
     threadId: gathering.threadId || null,
