@@ -11,7 +11,9 @@ const { truncate } = require('./util');
 const API = 'https://vzp-gta5rp.com/api';
 const FAMILY_NAME = 'RiseFam';
 const SERVER_ID = 25;
-const SIDE_WINDOW_MS = 90 * 60 * 1000;
+const MATCH_BEFORE_MS = 45 * 60 * 1000;
+const MATCH_AFTER_MS = 3 * 60 * 60 * 1000;
+const WATCH_MS = 4 * 60 * 60 * 1000;
 const watchers = new Map();
 
 const MAP_NAMES = {
@@ -133,22 +135,42 @@ function sideMatches(gathering, event) {
   return wanted === actual;
 }
 
-function pickClosest(items, at, timeOf) {
+function withinMatchWindow(eventAt, gatheringAt) {
+  const diff = eventAt - gatheringAt;
+  return diff >= -MATCH_BEFORE_MS && diff <= MATCH_AFTER_MS;
+}
+
+function pickClosestEvent(events, gatheringAt) {
   let best = null;
   let bestDiff = Infinity;
-  for (const item of items) {
-    const itemAt = timeOf(item);
-    if (!itemAt) continue;
-    const diff = Math.abs(itemAt - at);
+  for (const event of events) {
+    const eventAt = new Date(event.startedAt).getTime();
+    if (!eventAt || !withinMatchWindow(eventAt, gatheringAt)) continue;
+    const diff = Math.abs(eventAt - gatheringAt);
     if (diff < bestDiff) {
-      best = item;
+      best = event;
       bestDiff = diff;
     }
   }
-  return bestDiff <= SIDE_WINDOW_MS ? best : null;
+  return best;
 }
 
-function pickEvent(events, gathering) {
+function pickClosestGathering(gatherings, eventAt) {
+  let best = null;
+  let bestDiff = Infinity;
+  for (const gathering of gatherings) {
+    const gatheringAt = gatheringMoment(gathering);
+    if (!gatheringAt || !withinMatchWindow(eventAt, gatheringAt)) continue;
+    const diff = Math.abs(eventAt - gatheringAt);
+    if (diff < bestDiff) {
+      best = gathering;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+function pickEvent(events, gathering, takenIds = new Set()) {
   if (gathering?.vzpEventId) {
     const bound = events.find((event) => event.eventId === gathering.vzpEventId);
     if (bound) return bound;
@@ -159,13 +181,15 @@ function pickEvent(events, gathering) {
   const ours = events.filter(
     (event) =>
       event.serverId === SERVER_ID &&
+      event.eventId &&
+      !takenIds.has(event.eventId) &&
       eventSide(event) &&
       sideMatches(gathering, event),
   );
   const sameSide = gatheringSide(gathering)
     ? ours.filter((event) => eventSide(event) === gatheringSide(gathering))
     : ours;
-  return pickClosest(sameSide, at, (event) => new Date(event.startedAt).getTime());
+  return pickClosestEvent(sameSide, at);
 }
 
 function memberKeys(member) {
@@ -240,8 +264,8 @@ function pickGatheringForEvent(settings, event) {
   }
 
   return (
-    pickClosest(labeled, eventAt, gatheringMoment) ||
-    pickClosest(unlabeled, eventAt, gatheringMoment) || { main: [], bench: [] }
+    pickClosestGathering(labeled, eventAt) ||
+    pickClosestGathering(unlabeled, eventAt) || { main: [], bench: [] }
   );
 }
 
@@ -386,18 +410,41 @@ async function sendOrEditCard(client, gathering, payload) {
   }
 
   const message = await channel.send(payload);
-  store.updateGuild(guildId, (guild) => {
-    if (guild.gatherings.active?.id === gathering.id) {
-      guild.gatherings.active.statsMessageId = message.id;
-    }
-  });
+  patchGathering(guildId, gathering.id, { statsMessageId: message.id });
+  gathering.statsMessageId = message.id;
   return message;
 }
 
-async function refreshVzpStats(client, guildId) {
+function findStoredGathering(settings, gatheringId) {
+  const active = settings.gatherings?.active;
+  if (!gatheringId) return active?.closed ? active : null;
+  if (active?.id === gatheringId) return active.closed ? active : null;
+  return (settings.gatherings?.history || []).find((item) => item.id === gatheringId) || null;
+}
+
+function patchGathering(guildId, gatheringId, patch) {
+  if (!gatheringId) return;
+  store.updateGuild(guildId, (guild) => {
+    const apply = (item) => {
+      if (item?.id === gatheringId) Object.assign(item, patch);
+    };
+    apply(guild.gatherings?.active);
+    for (const item of guild.gatherings?.history || []) apply(item);
+  });
+}
+
+function takenEventIds(settings, gatheringId) {
+  const ids = new Set();
+  for (const item of listKnownGatherings(settings)) {
+    if (item?.id !== gatheringId && item?.vzpEventId) ids.add(item.vzpEventId);
+  }
+  return ids;
+}
+
+async function refreshVzpStats(client, guildId, gatheringId) {
   const settings = store.getGuild(guildId);
-  const gathering = settings.gatherings?.active;
-  if (!gathering?.closed || !settings.gatherings?.statsChannelId) return null;
+  const gathering = findStoredGathering(settings, gatheringId);
+  if (!gathering || !settings.gatherings?.statsChannelId) return null;
   gathering._guildId = guildId;
 
   const guild = await client.guilds.fetch(guildId);
@@ -407,7 +454,7 @@ async function refreshVzpStats(client, guildId) {
     let event = gathering.vzpEventId ? await getEvent(gathering.vzpEventId) : null;
     if (!event) {
       const events = await listFamilyEvents();
-      const summary = pickEvent(events, gathering);
+      const summary = pickEvent(events, gathering, takenEventIds(settings, gathering.id));
       if (!summary) {
         await sendOrEditCard(client, gathering, waitingCard(gathering));
         return null;
@@ -415,14 +462,7 @@ async function refreshVzpStats(client, guildId) {
       event = (await getEvent(summary.eventId)) || summary;
       if (event?.eventId && gathering.id) {
         gathering.vzpEventId = event.eventId;
-        store.updateGuild(guildId, (guild) => {
-          if (guild.gatherings.active?.id === gathering.id) {
-            guild.gatherings.active.vzpEventId = event.eventId;
-          }
-          for (const item of guild.gatherings.history || []) {
-            if (item.id === gathering.id) item.vzpEventId = event.eventId;
-          }
-        });
+        patchGathering(guildId, gathering.id, { vzpEventId: event.eventId });
       }
     }
     const payload = buildVzpCard(guild, gathering, event);
@@ -435,33 +475,45 @@ async function refreshVzpStats(client, guildId) {
   }
 }
 
-function stopWatching(guildId) {
-  const timer = watchers.get(guildId);
-  if (timer) clearInterval(timer);
-  watchers.delete(guildId);
+function watchKey(guildId, gatheringId) {
+  return `${guildId}:${gatheringId}`;
 }
 
-function watchVzpStats(client, guildId) {
-  stopWatching(guildId);
+function stopWatching(guildId, gatheringId) {
+  const key = watchKey(guildId, gatheringId);
+  const timer = watchers.get(key);
+  if (timer) clearInterval(timer);
+  watchers.delete(key);
+}
+
+function watchVzpStats(client, guildId, gatheringId) {
+  stopWatching(guildId, gatheringId);
   const started = Date.now();
+  const key = watchKey(guildId, gatheringId);
   const timer = setInterval(async () => {
-    if (Date.now() - started > 45 * 60 * 1000) {
-      stopWatching(guildId);
+    if (Date.now() - started > WATCH_MS) {
+      stopWatching(guildId, gatheringId);
       return;
     }
-    const event = await refreshVzpStats(client, guildId).catch((error) => {
+    const event = await refreshVzpStats(client, guildId, gatheringId).catch((error) => {
       console.warn('Ошибка обновления VZP статы:', error.message);
       return null;
     });
-    if (event?.endedAt) stopWatching(guildId);
+    if (event?.endedAt) stopWatching(guildId, gatheringId);
   }, 30_000);
   timer.unref?.();
-  watchers.set(guildId, timer);
+  watchers.set(key, timer);
 }
 
 async function publishVzpStats(client, guildId) {
-  const event = await refreshVzpStats(client, guildId);
-  if (!event?.endedAt) watchVzpStats(client, guildId);
+  const gathering = store.getGuild(guildId).gatherings?.active;
+  if (!gathering?.closed || !gathering.id) return null;
+  if (!store.getGuild(guildId).gatherings?.statsChannelId) {
+    console.warn('Канал VZP-статы не выбран в админке сборов.');
+    return null;
+  }
+  const event = await refreshVzpStats(client, guildId, gathering.id);
+  if (!event?.endedAt) watchVzpStats(client, guildId, gathering.id);
   return event;
 }
 

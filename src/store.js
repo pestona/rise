@@ -387,6 +387,7 @@ function getGuild(guildId) {
             content: gatherings.active.content || gatherings.active.title,
             timeAt: gatherings.active.timeAt || null,
             vzpEventId: gatherings.active.vzpEventId || null,
+            statsMessageId: gatherings.active.statsMessageId || null,
             startedAt: gatherings.active.startedAt || null,
             closedAt: gatherings.active.closedAt || null,
             threadId: gatherings.active.threadId || null,

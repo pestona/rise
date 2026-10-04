@@ -63,6 +63,7 @@ function snapshotGathering(gathering) {
     content: gathering.content || gathering.title,
     timeAt: gathering.timeAt || null,
     vzpEventId: gathering.vzpEventId || null,
+    statsMessageId: gathering.statsMessageId || null,
     startedAt: gathering.startedAt || null,
     closedAt: gathering.closedAt || null,
     threadId: gathering.threadId || null,
@@ -571,7 +572,7 @@ async function afterRosterChange(interaction) {
     archiveGathering(interaction.guildId);
     await ensureGatheringThread(interaction.client, interaction.guildId);
     await refreshGatheringList(interaction.client, interaction.guildId, true);
-    await refreshVzpStats(interaction.client, interaction.guildId).catch(() => null);
+    await refreshVzpStats(interaction.client, interaction.guildId, gathering.id).catch(() => null);
   }
 }
 
