@@ -72,6 +72,7 @@ function defaultGuild() {
     gatherings: {
       listChannelId: null,
       statsChannelId: null,
+      vzpWatch: { seeded: false, events: {} },
       threadRoleIds: [],
       tierRoleIds: [],
       selectedPresetId: 'mp',
@@ -347,6 +348,13 @@ function getGuild(guildId) {
       }
       if (!Array.isArray(gatherings.history)) {
         gatherings.history = [];
+        dirty = true;
+      }
+      if (!gatherings.vzpWatch || typeof gatherings.vzpWatch !== 'object') {
+        gatherings.vzpWatch = { seeded: false, events: {} };
+        dirty = true;
+      } else if (!gatherings.vzpWatch.events || typeof gatherings.vzpWatch.events !== 'object') {
+        gatherings.vzpWatch.events = {};
         dirty = true;
       }
       if (gatherings.active) {

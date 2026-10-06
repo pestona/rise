@@ -20,6 +20,7 @@ const { setupMemberLogs } = require('./memberLogs');
 const { setupSecurity, setupBackupTimers } = require('./security');
 const { setupActivity } = require('./activity');
 const afk = require('./afk');
+const vzpStats = require('./vzpStats');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -133,6 +134,7 @@ setupSecurity(client);
 setupBackupTimers(client);
 setupActivity(client);
 gatherings.setupGatheringThreadGuard(client);
+vzpStats.setupVzpWatch(client);
 autopark.setupAutoparkTimers(client);
 afk.setupAfk(client);
 
@@ -187,6 +189,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('afk:modal')) {
       await afk.handleAfkModal(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('vzp:pick:')) {
+      await vzpStats.handleVzpGatheringPick(interaction);
       return;
     }
 

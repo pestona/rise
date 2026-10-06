@@ -13,7 +13,7 @@ const store = require('./store');
 const { buildGatheringList, buildGatheringPanel, numberedMentions } = require('./ui');
 const { hasAccess, shortId, truncate } = require('./util');
 const { recordGathering } = require('./activity');
-const { publishVzpStats, refreshVzpStats } = require('./vzpStats');
+const { refreshVzpStats } = require('./vzpStats');
 
 const MAX_ROSTER = 50;
 const THREAD_LIFETIME_MS = 2 * 60 * 60 * 1000;
@@ -309,8 +309,8 @@ async function closeActiveGathering(client, guildId) {
   await createGatheringThread(client, guildId);
   await refreshGatheringList(client, guildId, true);
   archiveGathering(guildId);
-  await publishVzpStats(client, guildId).catch((error) => {
-    console.warn('Не удалось отправить стату VZP:', error.message);
+  await refreshVzpStats(client, guildId, active.id).catch((error) => {
+    console.warn('Не удалось обновить стату VZP:', error.message);
   });
   return true;
 }

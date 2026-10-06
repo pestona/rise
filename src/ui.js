@@ -812,6 +812,7 @@ function buildGatheringsTab(guild) {
           `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}\n` +
           `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
+          `Когда матч на сайте заканчивается, в этот канал приходит панель выбора сбора. После выбора уходит стата, панель удаляется.\n` +
           `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n` +
           `Тиры в списке: ${roleMentions(gatherings.tierRoleIds) || 'не выбраны'} (🥇 → 🥈 → 🥉 → без тира)\n\n` +
           `Тест статы: кнопка ниже → число → матч.`,
@@ -832,7 +833,7 @@ function buildGatheringsTab(guild) {
       ),
     )
     .addTextDisplayComponents((text) =>
-      text.setContent('**Куда писать стату VZP после завершения сбора**'),
+      text.setContent('**Куда писать панель выбора сбора и стату VZP**'),
     )
     .addActionRowComponents((row) =>
       row.setComponents(
