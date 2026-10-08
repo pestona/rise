@@ -12,8 +12,7 @@ const { truncate } = require('./util');
 const API = 'https://vzp-gta5rp.com/api';
 const FAMILY_NAME = 'RiseFam';
 const SERVER_ID = 25;
-const DEFENSE_MATCH_MS = 30 * 60 * 1000;
-const ATTACK_MATCH_MS = 3 * 60 * 60 * 1000;
+const MATCH_MS = 2 * 60 * 60 * 1000;
 const NO_GATHERING_WAIT_MS = 20 * 60 * 1000;
 const POLL_MS = 30 * 1000;
 const RECENT_MS = 6 * 60 * 60 * 1000;
@@ -134,8 +133,7 @@ function gatheringMoment(gathering) {
 function withinMatchWindow(eventAt, gatheringAt, side) {
   const diff = eventAt - gatheringAt;
   if (diff < 0) return false;
-  const limit = side === 'defense' ? DEFENSE_MATCH_MS : ATTACK_MATCH_MS;
-  return diff <= limit;
+  return diff <= MATCH_MS;
 }
 
 function pickClosestGathering(gatherings, eventAt, side) {
