@@ -17,6 +17,7 @@ const MATCH_AFTER_MS = 3 * 60 * 60 * 1000;
 const POLL_MS = 30 * 1000;
 const RECENT_MS = 6 * 60 * 60 * 1000;
 const PICK_PREFIX = 'vzp:pick:';
+const MENU_VERSION = 2;
 let scanning = false;
 const picksInFlight = new Set();
 
@@ -437,9 +438,28 @@ function saveWatch(guildId, watch) {
 }
 
 function gatheringChoiceLabel(gathering) {
-  const at = gathering.timeAt || gathering.closedAt || gathering.startedAt;
-  const when = at ? formatEventTime(at) : '—';
+  const at = gathering.timeAt || gathering.startedAt || gathering.closedAt;
+  const when = at ? `${formatDayLabel(eventDay(at))} ${formatEventTime(at)}` : '—';
   return truncate(`${when} · ${gathering.content || gathering.title || 'сбор'}`, 100);
+}
+
+function buildGatheringMenu(guildId, eventId) {
+  const gatherings = listPickableGatherings(store.getGuild(guildId));
+  if (!gatherings.length) return null;
+  if (`${PICK_PREFIX}${eventId}`.length > 100) return null;
+  return new StringSelectMenuBuilder()
+    .setCustomId(`${PICK_PREFIX}${eventId}`)
+    .setPlaceholder('Какой сбор к этому ВЗП?')
+    .addOptions(
+      gatherings.map((gathering) => {
+        const count = `${(gathering.main || []).length}/${gathering.maxMain || '—'}`;
+        const state = gathering.open ? 'открыт' : 'закрыт';
+        return new StringSelectMenuOptionBuilder()
+          .setLabel(gatheringChoiceLabel(gathering))
+          .setDescription(truncate(`${state} · основа ${count}`, 100))
+          .setValue(gathering.id);
+      }),
+    );
 }
 
 async function refreshVzpStats(client, guildId, gatheringId) {
@@ -468,10 +488,11 @@ async function sendPickPanel(client, guildId, event) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased()) return null;
 
-  const gatherings = listPickableGatherings(store.getGuild(guildId));
-  if (!gatherings.length) return null;
-  if (`${PICK_PREFIX}${event.eventId}`.length > 100) {
-    console.warn('Слишком длинный id матча VZP, панель не отправлена.');
+  const menu = buildGatheringMenu(guildId, event.eventId);
+  if (!menu) {
+    if (`${PICK_PREFIX}${event.eventId}`.length > 100) {
+      console.warn('Слишком длинный id матча VZP, панель не отправлена.');
+    }
     return null;
   }
 
@@ -482,20 +503,6 @@ async function sendPickPanel(client, guildId, event) {
   const side = weAttack ? 'Атака' : 'Защита';
   const result = finished ? (weWon ? 'Победа' : 'Поражение') : 'Завершён';
   const place = event.pointName || mapName(event.map);
-
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(`${PICK_PREFIX}${event.eventId}`)
-    .setPlaceholder('Какой сбор к этому ВЗП?')
-    .addOptions(
-      gatherings.map((gathering) => {
-        const count = `${(gathering.main || []).length}/${gathering.maxMain || '—'}`;
-        const state = gathering.open ? 'открыт' : 'закрыт';
-        return new StringSelectMenuOptionBuilder()
-          .setLabel(gatheringChoiceLabel(gathering))
-          .setDescription(truncate(`${state} · основа ${count}`, 100))
-          .setValue(gathering.id);
-      }),
-    );
 
   return channel.send({
     embeds: [
@@ -542,7 +549,26 @@ async function scanGuild(client, guildId) {
   for (const event of events) {
     if (!eventFinished(event)) continue;
     const prev = watch.events[event.eventId];
-    if (prev?.status === 'done' || prev?.status === 'skip' || prev?.status === 'prompt') continue;
+    if (prev?.status === 'prompt') {
+      if (prev.menuVersion !== MENU_VERSION && prev.messageId && prev.channelId) {
+        const channel = await client.channels.fetch(prev.channelId).catch(() => null);
+        const message = channel?.isTextBased()
+          ? await channel.messages.fetch(prev.messageId).catch(() => null)
+          : null;
+        const menu = message ? buildGatheringMenu(guildId, event.eventId) : null;
+        if (menu) {
+          const edited = await message
+            .edit({ components: [new ActionRowBuilder().setComponents(menu)] })
+            .catch(() => null);
+          if (edited) {
+            watch.events[event.eventId] = { ...prev, menuVersion: MENU_VERSION };
+            changed = true;
+          }
+        }
+      }
+      continue;
+    }
+    if (prev?.status === 'done' || prev?.status === 'skip') continue;
     if (bound.has(event.eventId)) {
       watch.events[event.eventId] = { status: 'done', at: Date.now() };
       changed = true;
@@ -574,6 +600,7 @@ async function scanGuild(client, guildId) {
       status: 'prompt',
       messageId: message.id,
       channelId: message.channelId,
+      menuVersion: MENU_VERSION,
       at: Date.now(),
     };
     changed = true;

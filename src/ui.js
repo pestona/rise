@@ -123,6 +123,11 @@ const PUBLIC_PANELS = [
     label: 'AFK',
     description: 'Уход в AFK или отпуск с причиной и временем',
   },
+  {
+    key: 'nicks',
+    label: 'Ники и статики',
+    description: 'Привязка игрового ника и статика к Discord',
+  },
 ];
 
 function buildAdminHub(guild, botName) {
@@ -214,6 +219,11 @@ function buildAdminHub(guild, botName) {
           .setLabel('Доступ')
           .setEmoji('🔐')
           .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:nicks')
+          .setLabel('Ники')
+          .setEmoji('🏷️')
+          .setStyle(ButtonStyle.Primary),
       ),
     );
 
@@ -225,6 +235,7 @@ function buildSummary(guild) {
     tickets: 'Заявки в семью',
     autopark: 'Автопарк',
     afk: 'AFK',
+    nicks: 'Ники и статики',
     gatherings: 'Сборы',
   };
   const published = (guild.panels || []).length
@@ -1452,6 +1463,167 @@ function buildAfkList(guild) {
   return container;
 }
 
+function nickEntries(guild) {
+  return [...(guild.nicks?.entries || [])].sort((a, b) =>
+    String(a.nick || '').localeCompare(String(b.nick || ''), 'ru', { sensitivity: 'base' }),
+  );
+}
+
+function formatNickDate(value) {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(value));
+}
+
+function nickLine(entry, index) {
+  return `${index + 1}. <@${entry.userId}> — **${entry.nick} | ${entry.staticId}** · ${formatNickDate(entry.updatedAt)}`;
+}
+
+function buildNicksPanel(guild) {
+  const count = guild.nicks?.entries?.length || 0;
+  const container = new ContainerBuilder().setAccentColor(0x5865f2);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Ники и статики\n` +
+          `Нажми кнопку и введи данные в формате **Ник | статик**.\n` +
+          `Запись привяжется к твоему Discord ID.\n\n` +
+          `В базе сейчас: **${count}**`,
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('nicks:set')
+          .setLabel('Добавить / изменить')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('nicks:delete')
+          .setLabel('Удалить мой ник')
+          .setStyle(ButtonStyle.Danger),
+      ),
+    );
+  return container;
+}
+
+function buildNickPickMenu(entries, mode, page) {
+  const start = page * 25;
+  return new StringSelectMenuBuilder()
+    .setCustomId(`admin:nickpick:${mode}`)
+    .setPlaceholder(mode === 'delete' ? 'Кого удалить?' : 'Кого изменить?')
+    .addOptions(
+      entries.slice(start, start + 25).map((entry) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(truncate(`${entry.nick} | ${entry.staticId}`, 100))
+          .setDescription(`Discord ID: ${entry.userId}`)
+          .setValue(entry.userId),
+      ),
+    );
+}
+
+function nickPageButtons(mode, page, totalPages) {
+  return [
+    new ButtonBuilder()
+      .setCustomId(`admin:nickpage:${mode}:${Math.max(0, page - 1)}`)
+      .setLabel('Назад')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 0),
+    new ButtonBuilder()
+      .setCustomId(`admin:nickpage:${mode}:${page + 1}`)
+      .setLabel('Дальше')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page + 1 >= totalPages),
+    new ButtonBuilder().setCustomId('admin:tab:nicks').setLabel('К списку').setStyle(ButtonStyle.Secondary),
+  ];
+}
+
+function buildNicksTab(guild, options = {}) {
+  const mode = options.mode || 'list';
+  const entries = nickEntries(guild);
+  const pageSize = mode === 'list' ? 15 : 25;
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+  const page = Math.min(Math.max(0, options.page || 0), totalPages - 1);
+  const start = page * pageSize;
+  const shown = entries.slice(start, start + pageSize);
+  const list = shown.length
+    ? shown.map((entry, index) => nickLine(entry, start + index)).join('\n')
+    : '_Ников ещё нет._';
+
+  const container = new ContainerBuilder().setAccentColor(0x5865f2);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Ники и статики\n` +
+          `Всего записей: **${entries.length}**\n` +
+          `Формат: **Ник | статик**\n\n` +
+          truncate(list, 3500),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:nickadd')
+          .setLabel('Добавить')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('admin:nickedit')
+          .setLabel('Изменить')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!entries.length),
+        new ButtonBuilder()
+          .setCustomId('admin:nickdel')
+          .setLabel('Удалить')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!entries.length),
+        backToHubButton(),
+      ),
+    );
+
+  if (mode === 'add') {
+    container
+      .addSeparatorComponents((sep) => sep.setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+      .addTextDisplayComponents((text) => text.setContent('**Добавить ник пользователю**'))
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new UserSelectMenuBuilder()
+            .setCustomId('admin:nickuser')
+            .setPlaceholder('Выберите участника')
+            .setMinValues(1)
+            .setMaxValues(1),
+        ),
+      );
+  } else if ((mode === 'edit' || mode === 'delete') && entries.length) {
+    container
+      .addSeparatorComponents((sep) => sep.setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+      .addTextDisplayComponents((text) =>
+        text.setContent(mode === 'delete' ? '**Удалить запись**' : '**Изменить запись**'),
+      )
+      .addActionRowComponents((row) => row.setComponents(buildNickPickMenu(entries, mode, page)))
+      .addActionRowComponents((row) => row.setComponents(...nickPageButtons(mode, page, totalPages)));
+  } else if (mode === 'list' && totalPages > 1) {
+    container.addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId(`admin:nickpage:list:${Math.max(0, page - 1)}`)
+          .setLabel('Назад')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page <= 0),
+        new ButtonBuilder()
+          .setCustomId(`admin:nickpage:list:${page + 1}`)
+          .setLabel('Дальше')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page + 1 >= totalPages),
+      ),
+    );
+  }
+
+  return container;
+}
+
 module.exports = {
   v2Flags,
   buildPublicPanel,
@@ -1478,4 +1650,6 @@ module.exports = {
   buildAfkList,
   buildAfkLog,
   formatAfkDuration,
+  buildNicksPanel,
+  buildNicksTab,
 };

@@ -64,6 +64,9 @@ function defaultGuild() {
       entries: [],
       logChannelId: null,
     },
+    nicks: {
+      entries: [],
+    },
     positions: {
       imageUrl: '',
       slotCount: 10,
@@ -324,6 +327,13 @@ function getGuild(guildId) {
         db.settings.guilds[guildId].afk.logChannelId = null;
         dirty = true;
       }
+    }
+    if (!db.settings.guilds[guildId].nicks) {
+      db.settings.guilds[guildId].nicks = defaultGuild().nicks;
+      dirty = true;
+    } else if (!Array.isArray(db.settings.guilds[guildId].nicks.entries)) {
+      db.settings.guilds[guildId].nicks.entries = [];
+      dirty = true;
     }
     if (!db.settings.guilds[guildId].gatherings) {
       db.settings.guilds[guildId].gatherings = defaultGuild().gatherings;

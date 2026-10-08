@@ -43,10 +43,21 @@ const {
   buildTicketTab,
   buildTypePage,
   buildDeleteQuestionMenu,
+  buildNicksTab,
 } = require('./ui');
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
 const { publishAfkPanel } = require('./afk');
+const {
+  getNickEntry,
+  formatNickStatic,
+  parseNickStatic,
+  upsertNick,
+  removeNick,
+  nickModal,
+  publishNicksPanel,
+  refreshNicksPanels,
+} = require('./nicks');
 const { closeActiveGathering, refreshGatheringPanels, refreshGatheringList, ensureGatheringThread } = require('./gatherings');
 const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
@@ -190,6 +201,13 @@ function adminPayload(interaction, page) {
   else if (page === 'autopark') container = buildAutoparkTab(guild);
   else if (page === 'gatherings') container = buildGatheringsTab(guild);
   else if (page === 'access') container = buildAccessTab(guild);
+  else if (page.startsWith('nicks')) {
+    const parts = page.split(':');
+    container = buildNicksTab(guild, {
+      mode: parts[1] || 'list',
+      page: Number(parts[2] || 0) || 0,
+    });
+  }
   else if (page.startsWith('activity')) {
     const period = page.split(':')[1] || 'week';
     container = buildActivityTab(getActivityStats(interaction.guildId, period), period);
@@ -844,6 +862,7 @@ async function handleAdminButton(interaction) {
   if (action === 'tab' && arg === 'autopark') return showAdmin(interaction, 'autopark');
   if (action === 'tab' && arg === 'summary') return showAdmin(interaction, 'summary');
   if (action === 'tab' && arg === 'gatherings') return showAdmin(interaction, 'gatherings');
+  if (action === 'tab' && arg === 'nicks') return showAdmin(interaction, 'nicks');
   if (action === 'tab' && arg === 'activity') return showAdmin(interaction, 'activity:week');
   if (action === 'tab' && arg === 'access') return showAdmin(interaction, 'access');
   if (action === 'tab' && arg === 'security') return showAdmin(interaction, 'security');
@@ -1013,6 +1032,15 @@ async function handleAdminButton(interaction) {
 
   if (action === 'vzpstats') {
     return showVzpDatePicker(interaction);
+  }
+
+  if (action === 'nickadd') return showAdmin(interaction, 'nicks:add');
+  if (action === 'nickedit') return showAdmin(interaction, 'nicks:edit:0');
+  if (action === 'nickdel') return showAdmin(interaction, 'nicks:delete:0');
+  if (action === 'nickpage') {
+    const mode = arg || 'list';
+    const page = Number(parts[3] || 0) || 0;
+    return showAdmin(interaction, `nicks:${mode}:${Math.max(0, page)}`);
   }
 
   if (action === 'gathclose') {
@@ -1296,6 +1324,36 @@ async function handleAdminSelect(interaction) {
     return showAdmin(interaction, 'gatherings');
   }
 
+  if (action === 'nickuser') {
+    const userId = interaction.values[0];
+    const current = formatNickStatic(getNickEntry(interaction.guildId, userId));
+    return interaction.showModal(nickModal(`admin:nicksave:${userId}`, current));
+  }
+
+  if (action === 'nickpick') {
+    const mode = typeKey;
+    const userId = interaction.values[0];
+    if (mode === 'delete') {
+      const removed = removeNick(interaction.guildId, userId);
+      if (!removed) {
+        return interaction.reply({
+          content: 'У этого человека ника уже нет.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      await refreshNicksPanels(interaction.client, interaction.guildId).catch(() => null);
+      return showAdmin(interaction, 'nicks');
+    }
+    const current = formatNickStatic(getNickEntry(interaction.guildId, userId));
+    if (!current) {
+      return interaction.reply({
+        content: 'У этого человека ника уже нет.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    return interaction.showModal(nickModal(`admin:nicksave:${userId}`, current));
+  }
+
   if (action === 'pickpanel') {
     store.updateGuild(interaction.guildId, (guild) => {
       guild.publishPanelKey = interaction.values[0] || 'tickets';
@@ -1323,7 +1381,9 @@ async function handleAdminSelect(interaction) {
           ? await publishAutoparkPanel(interaction, channel)
           : panelKey === 'afk'
             ? await publishAfkPanel(interaction, channel)
-            : await publishPanel(interaction, channel);
+            : panelKey === 'nicks'
+              ? await publishNicksPanel(interaction, channel)
+              : await publishPanel(interaction, channel);
       await interaction.update(adminPayload(interaction, 'panels'));
       await interaction.followUp({
         content: result.edited ? `Панель обновлена в ${channel}.` : `Панель опубликована в ${channel}.`,
@@ -1449,6 +1509,26 @@ async function handleAdminModal(interaction) {
       guild.security.windowSeconds = seconds;
     });
     return showAdmin(interaction, 'security');
+  }
+
+  if (action === 'nicksave') {
+    const userId = parts[2];
+    if (!/^\d{17,20}$/.test(userId || '')) {
+      return interaction.reply({
+        content: 'Некорректный Discord ID.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    const parsed = parseNickStatic(interaction.fields.getTextInputValue('value'));
+    if (!parsed.ok) {
+      return interaction.reply({
+        content: parsed.error,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    upsertNick(interaction.guildId, userId, parsed.nick, parsed.staticId);
+    await refreshNicksPanels(interaction.client, interaction.guildId).catch(() => null);
+    return showAdmin(interaction, 'nicks');
   }
 
   if (action === 'gathadd') {

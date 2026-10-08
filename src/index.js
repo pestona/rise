@@ -15,6 +15,7 @@ const autopark = require('./autopark');
 const positions = require('./positions');
 const gatherings = require('./gatherings');
 const admin = require('./admin');
+const nicks = require('./nicks');
 const { safeReply } = require('./util');
 const { setupMemberLogs } = require('./memberLogs');
 const { setupSecurity, setupBackupTimers } = require('./security');
@@ -67,9 +68,13 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName('контент')
-        .setDescription('Что за сбор / МП')
+        .setDescription('Тип сбора')
         .setRequired(true)
-        .setMaxLength(200),
+        .addChoices(
+          { name: 'att', value: 'att' },
+          { name: 'deff', value: 'deff' },
+          { name: 'мп', value: 'мп' },
+        ),
     )
     .addIntegerOption((option) =>
       option
@@ -189,6 +194,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('afk:modal')) {
       await afk.handleAfkModal(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('nicks:')) {
+      await nicks.handleNicksButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('nicks:modal')) {
+      await nicks.handleNicksModal(interaction);
       return;
     }
 
