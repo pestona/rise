@@ -12,14 +12,12 @@ const { truncate } = require('./util');
 const API = 'https://vzp-gta5rp.com/api';
 const FAMILY_NAME = 'RiseFam';
 const SERVER_ID = 25;
-const MATCH_BEFORE_MS = 45 * 60 * 1000;
-const MATCH_AFTER_MS = 3 * 60 * 60 * 1000;
+const DEFENSE_MATCH_MS = 30 * 60 * 1000;
+const ATTACK_MATCH_MS = 3 * 60 * 60 * 1000;
+const NO_GATHERING_WAIT_MS = 20 * 60 * 1000;
 const POLL_MS = 30 * 1000;
 const RECENT_MS = 6 * 60 * 60 * 1000;
-const PICK_PREFIX = 'vzp:pick:';
-const MENU_VERSION = 2;
 let scanning = false;
-const picksInFlight = new Set();
 
 const MAP_NAMES = {
   NEW_B_GHETTO_ANTS: 'Муравейник',
@@ -121,8 +119,8 @@ function gatheringSide(gathering) {
   const text = String(`${gathering?.content || ''} ${gathering?.title || ''}`)
     .toLowerCase()
     .replace(/ё/g, 'е');
-  const attackAt = text.search(/аттаск|атт|att/);
-  const defenseAt = text.search(/дефф|deff/);
+  const attackAt = text.search(/\batt\b|атт|аттаск/);
+  const defenseAt = text.search(/\bdeff\b|дефф/);
   if (attackAt === -1 && defenseAt === -1) return null;
   if (attackAt === -1) return 'defense';
   if (defenseAt === -1) return 'attack';
@@ -133,25 +131,20 @@ function gatheringMoment(gathering) {
   return Number(gathering?.timeAt || gathering?.closedAt || gathering?.startedAt || 0);
 }
 
-function sideMatches(gathering, event) {
-  const wanted = gatheringSide(gathering);
-  const actual = eventSide(event);
-  if (!wanted || !actual) return true;
-  return wanted === actual;
-}
-
-function withinMatchWindow(eventAt, gatheringAt) {
+function withinMatchWindow(eventAt, gatheringAt, side) {
   const diff = eventAt - gatheringAt;
-  return diff >= -MATCH_BEFORE_MS && diff <= MATCH_AFTER_MS;
+  if (diff < 0) return false;
+  const limit = side === 'defense' ? DEFENSE_MATCH_MS : ATTACK_MATCH_MS;
+  return diff <= limit;
 }
 
-function pickClosestGathering(gatherings, eventAt) {
+function pickClosestGathering(gatherings, eventAt, side) {
   let best = null;
   let bestDiff = Infinity;
   for (const gathering of gatherings) {
     const gatheringAt = gatheringMoment(gathering);
-    if (!gatheringAt || !withinMatchWindow(eventAt, gatheringAt)) continue;
-    const diff = Math.abs(eventAt - gatheringAt);
+    if (!gatheringAt || !withinMatchWindow(eventAt, gatheringAt, side)) continue;
+    const diff = eventAt - gatheringAt;
     if (diff < bestDiff) {
       best = gathering;
       bestDiff = diff;
@@ -180,7 +173,30 @@ function memberFirstNames(member) {
     .filter(Boolean);
 }
 
-function findMember(guild, charName, preferredIds = null) {
+function playerStaticKeys(player) {
+  return [player?.staticId, player?.static, player?.playerId, player?.id]
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).replace(/\D/g, ''))
+    .filter(Boolean);
+}
+
+function findMemberByNickBase(guild, player) {
+  const entries = store.getGuild(guild.id).nicks?.entries || [];
+  const charKey = normalizeNick(player?.charName);
+  const staticKeys = new Set(playerStaticKeys(player));
+  const entry = entries.find((item) => {
+    if (charKey && normalizeNick(item.nick) === charKey) return true;
+    const staticId = String(item.staticId || '').replace(/\D/g, '');
+    return staticId && staticKeys.has(staticId);
+  });
+  return entry ? guild.members.cache.get(entry.userId) || null : null;
+}
+
+function findMember(guild, player, preferredIds = null) {
+  const charName = typeof player === 'string' ? player : player?.charName;
+  const byBase = typeof player === 'string' ? null : findMemberByNickBase(guild, player);
+  if (byBase) return byBase;
+
   const key = normalizeNick(charName);
   if (!key) return null;
   const exact = guild.members.cache.find((member) => memberKeys(member).includes(key));
@@ -222,19 +238,10 @@ function pickGatheringForEvent(settings, event) {
   const actual = eventSide(event);
   if (!eventAt || !actual) return { main: [], bench: [] };
 
-  const labeled = [];
-  const unlabeled = [];
-  for (const gathering of listKnownGatherings(settings)) {
-    const wanted = gatheringSide(gathering);
-    if (wanted && wanted !== actual) continue;
-    if (wanted === actual) labeled.push(gathering);
-    else unlabeled.push(gathering);
-  }
-
-  return (
-    pickClosestGathering(labeled, eventAt) ||
-    pickClosestGathering(unlabeled, eventAt) || { main: [], bench: [] }
+  const sameSide = listKnownGatherings(settings).filter(
+    (gathering) => gatheringSide(gathering) === actual,
   );
+  return pickClosestGathering(sameSide, eventAt, actual) || { main: [], bench: [] };
 }
 
 function ourSidePlayers(event) {
@@ -250,13 +257,15 @@ function extraLine(item) {
 }
 
 function rosterLine(guild, player, index, preferredIds) {
-  const member = findMember(guild, player.charName, preferredIds);
+  const member = findMember(guild, player, preferredIds);
   return member
     ? `${index + 1}. <@${member.id}> · ${player.charName}`
     : `${index + 1}. ${player.charName}`;
 }
 
 function buildVzpCard(guild, gathering, event, options = {}) {
+  gathering = gathering || {};
+  const hasGathering = Boolean(gathering?.id);
   const main = gathering.main || [];
   const bench = gathering.bench || [];
   const mainSet = new Set(main);
@@ -267,8 +276,10 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   const extras = [];
 
   for (const player of inTerra) {
-    const member = findMember(guild, player.charName, preferredIds);
-    if (member && mainSet.has(member.id)) {
+    const member = findMember(guild, player, preferredIds);
+    if (!hasGathering) {
+      if (member) inTerraIds.add(member.id);
+    } else if (member && mainSet.has(member.id)) {
       inTerraIds.add(member.id);
     } else if (member && benchSet.has(member.id)) {
       inTerraIds.add(member.id);
@@ -292,10 +303,10 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     ? `${weWon ? '🏆 ПОБЕДА' : '❌ ПОРАЖЕНИЕ'} — ${place} (${side})`
     : `⏳ В ПРОЦЕССЕ — ${place} (${side})`;
   const maxPlayers = event.maxPlayers || inTerra.length || gathering.maxMain || 0;
-  const gatheringLine = gathering.id
+  const gatheringLine = hasGathering
     ? `Сбор: **${gathering.title || gathering.content || 'сбор'}**` +
       (gathering.threadId ? ` · ветка: <#${gathering.threadId}>` : '')
-    : 'Сбор не найден по времени этого матча';
+    : '**На эту ВЗП не было сбора.**';
 
   const notes = [];
   if (extras.length) {
@@ -304,6 +315,9 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   }
   if (missedMain.length) {
     notes.push(`Из основы не зашли: **${missedMain.length}**`);
+  }
+  if (!hasGathering) {
+    notes.push('Бот не нашёл подходящий сбор `att/deff` в допустимом окне.');
   }
 
   const roster = inTerra.length
@@ -326,11 +340,13 @@ function buildVzpCard(guild, gathering, event, options = {}) {
           `${roster}`,
         4000,
       ),
-    )
-    .addFields({
+    );
+  if (hasGathering) {
+    embed.addFields({
       name: `Резерв · ${bench.length}`,
       value: truncate(reserve, 1024),
     });
+  }
 
   return {
     embeds: [embed],
@@ -397,26 +413,6 @@ function eventEndedAt(event) {
   return 0;
 }
 
-function listPickableGatherings(settings) {
-  const items = [];
-  const seen = new Set();
-  const active = settings.gatherings?.active;
-  if (active?.id) {
-    seen.add(active.id);
-    items.push({ ...active, open: !active.closed });
-  }
-  for (const item of settings.gatherings?.history || []) {
-    if (!item?.id || seen.has(item.id)) continue;
-    seen.add(item.id);
-    items.push(item);
-  }
-  items.sort(
-    (a, b) =>
-      (b.timeAt || b.closedAt || b.startedAt || 0) - (a.timeAt || a.closedAt || a.startedAt || 0),
-  );
-  return items.slice(0, 25);
-}
-
 function boundEventIds(settings) {
   const ids = new Set();
   for (const item of listKnownGatherings(settings)) {
@@ -435,31 +431,6 @@ function saveWatch(guildId, watch) {
   store.updateGuild(guildId, (guild) => {
     guild.gatherings.vzpWatch = { seeded: Boolean(watch.seeded), events };
   });
-}
-
-function gatheringChoiceLabel(gathering) {
-  const at = gathering.timeAt || gathering.startedAt || gathering.closedAt;
-  const when = at ? `${formatDayLabel(eventDay(at))} ${formatEventTime(at)}` : '—';
-  return truncate(`${when} · ${gathering.content || gathering.title || 'сбор'}`, 100);
-}
-
-function buildGatheringMenu(guildId, eventId) {
-  const gatherings = listPickableGatherings(store.getGuild(guildId));
-  if (!gatherings.length) return null;
-  if (`${PICK_PREFIX}${eventId}`.length > 100) return null;
-  return new StringSelectMenuBuilder()
-    .setCustomId(`${PICK_PREFIX}${eventId}`)
-    .setPlaceholder('Какой сбор к этому ВЗП?')
-    .addOptions(
-      gatherings.map((gathering) => {
-        const count = `${(gathering.main || []).length}/${gathering.maxMain || '—'}`;
-        const state = gathering.open ? 'открыт' : 'закрыт';
-        return new StringSelectMenuOptionBuilder()
-          .setLabel(gatheringChoiceLabel(gathering))
-          .setDescription(truncate(`${state} · основа ${count}`, 100))
-          .setValue(gathering.id);
-      }),
-    );
 }
 
 async function refreshVzpStats(client, guildId, gatheringId) {
@@ -482,48 +453,26 @@ async function refreshVzpStats(client, guildId, gatheringId) {
   }
 }
 
-async function sendPickPanel(client, guildId, event) {
+async function sendStandaloneCard(client, guildId, gathering, event) {
   const channelId = getStatsChannelId(guildId);
-  if (!channelId) return null;
-  const channel = await client.channels.fetch(channelId).catch(() => null);
+  const channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
   if (!channel?.isTextBased()) return null;
 
-  const menu = buildGatheringMenu(guildId, event.eventId);
-  if (!menu) {
-    if (`${PICK_PREFIX}${event.eventId}`.length > 100) {
-      console.warn('Слишком длинный id матча VZP, панель не отправлена.');
+  const guild = await client.guilds.fetch(guildId);
+  await guild.members.fetch().catch(() => null);
+  if (gathering?.id) {
+    gathering._guildId = guildId;
+    const message = await sendOrEditCard(client, gathering, buildVzpCard(guild, gathering, event));
+    if (message) {
+      patchGathering(guildId, gathering.id, {
+        vzpEventId: event.eventId,
+        statsMessageId: message.id,
+      });
     }
-    return null;
+    return message;
   }
 
-  const weAttack = isOurFamily(event.attackerName);
-  const opponent = weAttack ? event.defenderName : event.attackerName;
-  const finished = event.isAttackerWin === true || event.isAttackerWin === false;
-  const weWon = finished && isOurFamily(event.winnerName);
-  const side = weAttack ? 'Атака' : 'Защита';
-  const result = finished ? (weWon ? 'Победа' : 'Поражение') : 'Завершён';
-  const place = event.pointName || mapName(event.map);
-
-  return channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(finished ? (weWon ? 0x57f287 : 0xed4245) : 0xfee75c)
-        .setTitle('ВЗП закончилось — выбери сбор')
-        .setDescription(
-          truncate(
-            `**${FAMILY_NAME}** vs **${opponent || '—'}**\n` +
-              `${side} · ${place}\n` +
-              `Когда: **${formatEventWhen(event.startedAt)}**\n` +
-              `Итог: **${result}**\n\n` +
-              `Выбери сбор, к которому относится этот матч.\n` +
-              `После выбора придёт стата, а эта панель удалится.`,
-            4000,
-          ),
-        ),
-    ],
-    components: [new ActionRowBuilder().setComponents(menu)],
-    allowedMentions: { parse: [] },
-  });
+  return channel.send(buildVzpCard(guild, { _guildId: guildId }, event));
 }
 
 async function scanGuild(client, guildId) {
@@ -543,66 +492,69 @@ async function scanGuild(client, guildId) {
     events: { ...(settings.gatherings.vzpWatch?.events || {}) },
   };
   const bound = boundEventIds(settings);
-  const pending = [];
   let changed = false;
 
   for (const event of events) {
     if (!eventFinished(event)) continue;
     const prev = watch.events[event.eventId];
-    if (prev?.status === 'prompt') {
-      if (prev.menuVersion !== MENU_VERSION && prev.messageId && prev.channelId) {
-        const channel = await client.channels.fetch(prev.channelId).catch(() => null);
-        const message = channel?.isTextBased()
-          ? await channel.messages.fetch(prev.messageId).catch(() => null)
-          : null;
-        const menu = message ? buildGatheringMenu(guildId, event.eventId) : null;
-        if (menu) {
-          const edited = await message
-            .edit({ components: [new ActionRowBuilder().setComponents(menu)] })
-            .catch(() => null);
-          if (edited) {
-            watch.events[event.eventId] = { ...prev, menuVersion: MENU_VERSION };
-            changed = true;
-          }
-        }
-      }
-      continue;
-    }
     if (prev?.status === 'done' || prev?.status === 'skip') continue;
     if (bound.has(event.eventId)) {
       watch.events[event.eventId] = { status: 'done', at: Date.now() };
       changed = true;
       continue;
     }
+
+    if (prev?.status === 'prompt' && prev.messageId && prev.channelId) {
+      const channel = await client.channels.fetch(prev.channelId).catch(() => null);
+      const message = channel?.isTextBased()
+        ? await channel.messages.fetch(prev.messageId).catch(() => null)
+        : null;
+      await message?.delete().catch(() => null);
+    }
+
+    const ended = eventEndedAt(event);
     if (!watch.seeded) {
-      const ended = eventEndedAt(event);
       if (!ended || Date.now() - ended > RECENT_MS) {
         watch.events[event.eventId] = { status: 'skip', at: Date.now() };
         changed = true;
         continue;
       }
     }
-    pending.push(event);
-  }
 
-  if (!watch.seeded) {
-    watch.seeded = true;
-    changed = true;
-  }
+    const detail = (await getEvent(event.eventId).catch(() => null)) || event;
+    if (!eventFinished(detail)) continue;
 
-  for (const event of pending) {
-    const message = await sendPickPanel(client, guildId, event).catch((error) => {
-      console.warn('Не удалось отправить панель выбора сбора:', error.message);
+    const currentSettings = store.getGuild(guildId);
+    const gathering = pickGatheringForEvent(currentSettings, detail);
+    const hasGathering = Boolean(gathering?.id);
+    const detailEnded = eventEndedAt(detail);
+    if (!hasGathering && (!detailEnded || Date.now() - detailEnded < NO_GATHERING_WAIT_MS)) {
+      continue;
+    }
+
+    const message = await sendStandaloneCard(
+      client,
+      guildId,
+      hasGathering ? gathering : null,
+      detail,
+    ).catch((error) => {
+      console.warn('Не удалось отправить стату VZP:', error.message);
       return null;
     });
     if (!message) continue;
     watch.events[event.eventId] = {
-      status: 'prompt',
+      status: 'done',
       messageId: message.id,
       channelId: message.channelId,
-      menuVersion: MENU_VERSION,
+      gatheringId: hasGathering ? gathering.id : null,
+      noGathering: !hasGathering,
       at: Date.now(),
     };
+    changed = true;
+  }
+
+  if (!watch.seeded) {
+    watch.seeded = true;
     changed = true;
   }
 
@@ -633,99 +585,6 @@ function setupVzpWatch(client) {
     }, POLL_MS);
     timer.unref?.();
   });
-}
-
-async function handleVzpGatheringPick(interaction) {
-  const eventId = interaction.customId.slice(PICK_PREFIX.length);
-  const gatheringId = interaction.values[0];
-  const lockKey = `${interaction.guildId}:${eventId}`;
-  if (picksInFlight.has(lockKey)) {
-    return interaction.reply({
-      content: 'Этот матч уже привязывают.',
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-  picksInFlight.add(lockKey);
-
-  try {
-    const settings = store.getGuild(interaction.guildId);
-    if (settings.gatherings?.vzpWatch?.events?.[eventId]?.status === 'done') {
-      await interaction.reply({
-        content: 'К этому матчу сбор уже выбран.',
-        flags: MessageFlags.Ephemeral,
-      });
-      await interaction.message.delete().catch(() => null);
-      return;
-    }
-
-    const gathering = findGatheringById(settings, gatheringId);
-    if (!gathering) {
-      return interaction.reply({
-        content: 'Этот сбор уже не найден. Выбери другой.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    await interaction.deferUpdate();
-    const event = await getEvent(eventId);
-    if (!event) {
-      await interaction.message.edit({
-        content: 'Этот матч на сайте уже не найден.',
-        components: interaction.message.components,
-      }).catch(() => null);
-      return;
-    }
-
-    const channelId = getStatsChannelId(interaction.guildId);
-    const channel = channelId
-      ? await interaction.client.channels.fetch(channelId).catch(() => null)
-      : null;
-    if (!channel?.isTextBased()) {
-      await interaction.message.edit({
-        content: 'Канал VZP-статы не выбран.',
-        components: interaction.message.components,
-      }).catch(() => null);
-      return;
-    }
-
-    const guild = await interaction.client.guilds.fetch(interaction.guildId);
-    await guild.members.fetch().catch(() => null);
-    gathering._guildId = interaction.guildId;
-    const message = await channel.send(buildVzpCard(guild, gathering, event));
-    patchGathering(interaction.guildId, gathering.id, {
-      vzpEventId: event.eventId || eventId,
-      statsMessageId: message.id,
-    });
-    store.updateGuild(interaction.guildId, (guildSettings) => {
-      if (!guildSettings.gatherings.vzpWatch) {
-        guildSettings.gatherings.vzpWatch = { seeded: true, events: {} };
-      }
-      guildSettings.gatherings.vzpWatch.seeded = true;
-      if (!guildSettings.gatherings.vzpWatch.events) guildSettings.gatherings.vzpWatch.events = {};
-      guildSettings.gatherings.vzpWatch.events[eventId] = {
-        status: 'done',
-        messageId: message.id,
-        gatheringId: gathering.id,
-        at: Date.now(),
-      };
-    });
-    await interaction.message.delete().catch(() => null);
-  } catch (error) {
-    console.warn('Не удалось привязать сбор к ВЗП:', error.message);
-    if (interaction.deferred || interaction.replied) {
-      await interaction.message.edit({
-        content: `Не удалось отправить стату: ${error.message}`,
-        components: interaction.message.components,
-      }).catch(() => null);
-    } else {
-      await interaction.reply({
-        content: `Не удалось отправить стату: ${error.message}`,
-        flags: MessageFlags.Ephemeral,
-      }).catch(() => null);
-    }
-  } finally {
-    picksInFlight.delete(lockKey);
-  }
 }
 
 async function publishManualVzpStats(client, guildId, eventId) {
@@ -864,7 +723,6 @@ async function handleVzpEventPick(interaction) {
 module.exports = {
   refreshVzpStats,
   setupVzpWatch,
-  handleVzpGatheringPick,
   showVzpDatePicker,
   handleVzpDatePick,
   handleVzpEventPick,

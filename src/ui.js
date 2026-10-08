@@ -823,7 +823,7 @@ function buildGatheringsTab(guild) {
           `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}\n` +
           `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
-          `Когда матч на сайте заканчивается, в этот канал приходит панель выбора сбора. После выбора уходит стата, панель удаляется.\n` +
+          `Когда матч ВЗП заканчивается, бот сам ищет сбор att/deff и отправляет стату.\n` +
           `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n` +
           `Тиры в списке: ${roleMentions(gatherings.tierRoleIds) || 'не выбраны'} (🥇 → 🥈 → 🥉 → без тира)\n\n` +
           `Тест статы: кнопка ниже → число → матч.`,
@@ -844,7 +844,7 @@ function buildGatheringsTab(guild) {
       ),
     )
     .addTextDisplayComponents((text) =>
-      text.setContent('**Куда писать панель выбора сбора и стату VZP**'),
+      text.setContent('**Куда писать стату VZP**'),
     )
     .addActionRowComponents((row) =>
       row.setComponents(
@@ -1484,15 +1484,13 @@ function nickLine(entry, index) {
 }
 
 function buildNicksPanel(guild) {
-  const count = guild.nicks?.entries?.length || 0;
   const container = new ContainerBuilder().setAccentColor(0x5865f2);
   container
     .addTextDisplayComponents((text) =>
       text.setContent(
         `## Ники и статики\n` +
           `Нажми кнопку и введи данные в формате **Ник | статик**.\n` +
-          `Запись привяжется к твоему Discord ID.\n\n` +
-          `В базе сейчас: **${count}**`,
+          `Запись привяжется к твоему Discord ID.`,
       ),
     )
     .addActionRowComponents((row) =>

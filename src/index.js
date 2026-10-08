@@ -207,11 +207,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('vzp:pick:')) {
-      await vzpStats.handleVzpGatheringPick(interaction);
-      return;
-    }
-
     if (
       (interaction.isButton() ||
         interaction.isStringSelectMenu() ||
