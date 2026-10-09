@@ -10,7 +10,7 @@ const store = require('./store');
 const { truncate } = require('./util');
 
 const API = 'https://vzp-gta5rp.com/api';
-const FAMILY_NAME = 'RiseFam';
+const FAMILY_NAME = 'Trapaholic';
 const SERVER_ID = 25;
 const MATCH_MS = 2 * 60 * 60 * 1000;
 const NO_GATHERING_WAIT_MS = 20 * 60 * 1000;
@@ -609,7 +609,7 @@ async function showVzpDatePicker(interaction) {
   const days = [...new Set(events.map((event) => eventDay(event.startedAt)))];
   if (!days.length) {
     return interaction.reply({
-      content: 'На сайте нет матчей RiseFam Chiliad.',
+      content: 'На сайте нет матчей Trapaholic Chiliad.',
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -644,7 +644,7 @@ async function showVzpEventPicker(interaction, day, events, options = {}) {
   );
   if (!list.length) {
     const payload = {
-      content: `За ${formatDayLabel(day)} матчей RiseFam нет.`,
+      content: `За ${formatDayLabel(day)} матчей Trapaholic нет.`,
       components: [],
     };
     return options.reply
