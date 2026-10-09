@@ -171,30 +171,8 @@ function memberFirstNames(member) {
     .filter(Boolean);
 }
 
-function playerStaticKeys(player) {
-  return [player?.staticId, player?.static, player?.playerId, player?.id]
-    .filter((value) => value !== null && value !== undefined)
-    .map((value) => String(value).replace(/\D/g, ''))
-    .filter(Boolean);
-}
-
-function findMemberByNickBase(guild, player) {
-  const entries = store.getGuild(guild.id).nicks?.entries || [];
-  const charKey = normalizeNick(player?.charName);
-  const staticKeys = new Set(playerStaticKeys(player));
-  const entry = entries.find((item) => {
-    if (charKey && normalizeNick(item.nick) === charKey) return true;
-    const staticId = String(item.staticId || '').replace(/\D/g, '');
-    return staticId && staticKeys.has(staticId);
-  });
-  return entry ? guild.members.cache.get(entry.userId) || null : null;
-}
-
 function findMember(guild, player, preferredIds = null) {
   const charName = typeof player === 'string' ? player : player?.charName;
-  const byBase = typeof player === 'string' ? null : findMemberByNickBase(guild, player);
-  if (byBase) return byBase;
-
   const key = normalizeNick(charName);
   if (!key) return null;
   const exact = guild.members.cache.find((member) => memberKeys(member).includes(key));
