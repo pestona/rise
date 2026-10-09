@@ -175,8 +175,13 @@ function findMember(guild, player, preferredIds = null) {
   const charName = typeof player === 'string' ? player : player?.charName;
   const key = normalizeNick(charName);
   if (!key) return null;
-  const exact = guild.members.cache.find((member) => memberKeys(member).includes(key));
-  if (exact) return exact;
+  const exactMatches = guild.members.cache.filter((member) => memberKeys(member).includes(key));
+  if (exactMatches.size && preferredIds) {
+    const preferred = exactMatches.find((member) => preferredIds.has(member.id));
+    if (preferred) return preferred;
+  }
+  if (exactMatches.size === 1) return exactMatches.first();
+  if (exactMatches.size > 1) return exactMatches.first();
 
   const first = firstNameKey(charName);
   if (first.length >= 3) {
@@ -189,13 +194,16 @@ function findMember(guild, player, preferredIds = null) {
   }
 
   if (key.length < 5) return null;
-  return (
-    guild.members.cache.find((member) =>
-      memberKeys(member).some(
-        (nick) => nick.length >= 5 && (nick.includes(key) || key.includes(nick)),
-      ),
-    ) || null
+  const fuzzy = guild.members.cache.filter((member) =>
+    memberKeys(member).some(
+      (nick) => nick.length >= 5 && (nick.includes(key) || key.includes(nick)),
+    ),
   );
+  if (fuzzy.size && preferredIds) {
+    const preferred = fuzzy.find((member) => preferredIds.has(member.id));
+    if (preferred) return preferred;
+  }
+  return fuzzy.first() || null;
 }
 
 function listKnownGatherings(settings) {
