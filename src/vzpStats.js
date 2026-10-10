@@ -430,7 +430,11 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     .setDescription(
       truncate(
         `**${FAMILY_NAME}** vs **${opponent || '—'}**\n` +
-          `Когда: **${formatEventWhen(event.startedAt)}**\n` +
+          `Когда: **${formatEventWhen(event.startedAt)}**` +
+          (event.eventId
+            ? ` · [матч на сайте](https://vzp-gta5rp.com/stats/families/${FAMILY_ID})`
+            : '') +
+          `\n` +
           `${gatheringLine}\n` +
           (notes.length ? `\n${notes.join('\n')}\n` : '\n') +
           `\n**Состав ${inTerra.length}/${maxPlayers}** · ${finished ? 'Завершён' : 'Идёт'}\n` +
