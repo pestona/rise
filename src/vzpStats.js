@@ -10,7 +10,9 @@ const store = require('./store');
 const { truncate } = require('./util');
 
 const API = 'https://vzp-gta5rp.com/api';
+const FAMILY_ID = 170721;
 const FAMILY_NAME = 'Trapaholic';
+const FAMILY_ALIASES = ['Trapaholic', 'TRAPA', 'RiseFam'].map(normalizeNick);
 const SERVER_ID = 25;
 const MATCH_MS = 2 * 60 * 60 * 1000;
 const NO_GATHERING_WAIT_MS = 20 * 60 * 1000;
@@ -24,6 +26,7 @@ const MAP_NAMES = {
   NEW_S_SANDYSHORES: 'Сэнди-Шорс',
   NEW_S_WINDFARM: 'Ветряки',
   NEW_S_ELBURRO: 'Эль-Бурро',
+  NEW_S_STABCITY: 'Стаб-Сити',
   NEW_S_BANNING_ANGAR: 'Ангар',
   NEW_B_LS_CINEMA: 'Киностудия',
   NEW_S_EL_RANCHO_SMALL_OILBASE: 'Нефтебаза',
@@ -32,6 +35,10 @@ const MAP_NAMES = {
 
 function mapName(code) {
   return MAP_NAMES[code] || code || 'карта';
+}
+
+function mapTitle(event) {
+  return event?.mapLabel || event?.pointName || mapName(event?.map);
 }
 
 function normalizeNick(name) {
@@ -51,13 +58,23 @@ async function fetchJson(path) {
 
 async function listFamilyEvents(limit = 50) {
   const events = await fetchJson(
-    `/events?limit=${limit}&offset=0&server_id=${SERVER_ID}&search=${encodeURIComponent(FAMILY_NAME)}`,
+    `/stats/organizations/${FAMILY_ID}/history?limit=${limit}&offset=0`,
   );
-  return (Array.isArray(events) ? events : []).filter(
-    (event) =>
-      event.serverId === SERVER_ID &&
-      (isOurFamily(event.attackerName) || isOurFamily(event.defenderName)),
-  );
+  return (Array.isArray(events) ? events : []).map((event) => {
+    const attack = event.role === 'ATK';
+    const opponent = event.opponentName || '—';
+    return {
+      ...event,
+      serverId: SERVER_ID,
+      startedAt: event.startedAt || event.date,
+      mapLabel: event.map,
+      pointName: event.map,
+      attackerName: attack ? FAMILY_NAME : opponent,
+      defenderName: attack ? opponent : FAMILY_NAME,
+      winnerName: event.isWin ? FAMILY_NAME : opponent,
+      _role: attack ? 'attack' : 'defense',
+    };
+  });
 }
 
 function eventDay(startedAt) {
@@ -88,13 +105,15 @@ function formatEventWhen(startedAt) {
 }
 
 function opponentName(event) {
+  if (event?._role === 'attack') return event.defenderName;
+  if (event?._role === 'defense') return event.attackerName;
   return isOurFamily(event.attackerName) ? event.defenderName : event.attackerName;
 }
 
 function eventOptionLabel(event) {
-  const mark = !event.endedAt ? 'идёт' : isOurFamily(event.winnerName) ? 'W' : 'L';
+  const mark = !eventFinished(event) ? 'идёт' : isOurFamily(event.winnerName) ? 'W' : 'L';
   return truncate(
-    `${formatEventTime(event.startedAt)} ${mark} vs ${opponentName(event) || '—'} · ${event.pointName || 'карта'}`,
+    `${formatEventTime(event.startedAt)} ${mark} vs ${opponentName(event) || '—'} · ${mapTitle(event)}`,
     100,
   );
 }
@@ -105,10 +124,11 @@ async function getEvent(eventId) {
 }
 
 function isOurFamily(name) {
-  return normalizeNick(name) === normalizeNick(FAMILY_NAME);
+  return FAMILY_ALIASES.includes(normalizeNick(name));
 }
 
 function eventSide(event) {
+  if (event?._role) return event._role;
   if (isOurFamily(event?.attackerName)) return 'attack';
   if (isOurFamily(event?.defenderName)) return 'defense';
   return null;
@@ -229,6 +249,8 @@ function pickGatheringForEvent(settings, event) {
 }
 
 function ourSidePlayers(event) {
+  if (event?._role === 'attack') return event.attackers || [];
+  if (event?._role === 'defense') return event.defenders || [];
   if (isOurFamily(event.attackerName)) return event.attackers || [];
   if (isOurFamily(event.defenderName)) return event.defenders || [];
   return [];
@@ -282,7 +304,7 @@ function buildVzpCard(guild, gathering, event, options = {}) {
   const finished = event.isAttackerWin !== null && event.isAttackerWin !== undefined;
   const weWon = finished && isOurFamily(event.winnerName);
   const side = weAttack ? 'Атака' : 'Защита';
-  const place = mapName(event.map);
+  const place = mapTitle(event);
   const title = finished
     ? `${weWon ? '🏆 ПОБЕДА' : '❌ ПОРАЖЕНИЕ'} — ${place} (${side})`
     : `⏳ В ПРОЦЕССЕ — ${place} (${side})`;
@@ -505,7 +527,10 @@ async function scanGuild(client, guildId) {
       }
     }
 
-    const detail = (await getEvent(event.eventId).catch(() => null)) || event;
+    const detailRaw = await getEvent(event.eventId).catch(() => null);
+    const detail = detailRaw
+      ? { ...event, ...detailRaw, _role: event._role, mapLabel: event.mapLabel }
+      : event;
     if (!eventFinished(detail)) continue;
 
     const currentSettings = store.getGuild(guildId);
