@@ -416,6 +416,7 @@ function getGuild(guildId) {
             threadId: gatherings.active.threadId || null,
             threadDeleteAt: gatherings.active.threadDeleteAt || null,
             channelId: gatherings.active.channelId || null,
+            messageId: gatherings.active.messageId || null,
             maxMain: gatherings.active.maxMain || 0,
             main: [...(gatherings.active.main || [])],
             bench: [...(gatherings.active.bench || [])],

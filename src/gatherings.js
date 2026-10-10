@@ -69,6 +69,7 @@ function snapshotGathering(gathering) {
     threadId: gathering.threadId || null,
     threadDeleteAt: gathering.threadDeleteAt || null,
     channelId: gathering.channelId || null,
+    messageId: gathering.messageId || null,
     maxMain: gathering.maxMain || 0,
     main: [...(gathering.main || [])],
     bench: [...(gathering.bench || [])],

@@ -393,8 +393,15 @@ function buildVzpCard(guild, gathering, event, options = {}) {
     ? `${weWon ? '🏆 ПОБЕДА' : '❌ ПОРАЖЕНИЕ'} — ${place} (${side})`
     : `⏳ В ПРОЦЕССЕ — ${place} (${side})`;
   const maxPlayers = event.maxPlayers || inTerra.length || gathering.maxMain || 0;
+  const gatheringUrl =
+    guild?.id && gathering.channelId && gathering.messageId
+      ? `https://discord.com/channels/${guild.id}/${gathering.channelId}/${gathering.messageId}`
+      : guild?.id && gathering.threadId
+        ? `https://discord.com/channels/${guild.id}/${gathering.threadId}`
+        : null;
   const gatheringLine = hasGathering
     ? `Сбор: **${gathering.title || gathering.content || 'сбор'}**` +
+      (gatheringUrl ? ` · [открыть](${gatheringUrl})` : '') +
       (gathering.threadId ? ` · ветка: <#${gathering.threadId}>` : '')
     : '**На эту ВЗП не было сбора.**';
 
