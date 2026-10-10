@@ -75,6 +75,7 @@ function defaultGuild() {
     gatherings: {
       listChannelId: null,
       statsChannelId: null,
+      archiveChannelId: null,
       vzpWatch: { seeded: false, events: {} },
       threadRoleIds: [],
       tierRoleIds: [],
@@ -346,6 +347,10 @@ function getGuild(guildId) {
       }
       if (!Array.isArray(gatherings.threadRoleIds)) {
         gatherings.threadRoleIds = [];
+        dirty = true;
+      }
+      if (!Object.hasOwn(gatherings, 'archiveChannelId')) {
+        gatherings.archiveChannelId = null;
         dirty = true;
       }
       if (!Array.isArray(gatherings.tierRoleIds)) {

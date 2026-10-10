@@ -1303,6 +1303,13 @@ async function handleAdminSelect(interaction) {
     return showAdmin(interaction, 'gatherings');
   }
 
+  if (action === 'gatharchive') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.gatherings.archiveChannelId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'gatherings');
+  }
+
   if (action === 'gaththreadroles') {
     store.updateGuild(interaction.guildId, (guild) => {
       guild.gatherings.threadRoleIds = [...interaction.values];

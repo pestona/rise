@@ -758,7 +758,7 @@ function buildGatheringList(guild, options = {}) {
         (closed && active?.threadId
           ? `\n**Ветка основы:** <#${active.threadId}>` +
             (active.threadDeleteAt
-              ? ` · удалится <t:${Math.floor(active.threadDeleteAt / 1000)}:R>`
+              ? ` · в архив <t:${Math.floor(active.threadDeleteAt / 1000)}:R>`
               : '')
           : ''),
     )
@@ -823,6 +823,7 @@ function buildGatheringsTab(guild) {
           `Роль для пинга выбирается прямо в команде.\n\n` +
           `Активный сбор: ${activeText}\n` +
           `Канал VZP-статы: ${channelMention(gatherings.statsChannelId)}\n` +
+          `Архив веток: ${channelMention(gatherings.archiveChannelId)}\n` +
           `Когда матч ВЗП заканчивается, бот сам ищет сбор att/deff и отправляет стату.\n` +
           `Писать в ветке могут только: ${roleMentions(gatherings.threadRoleIds)}\n` +
           `Тиры в списке: ${roleMentions(gatherings.tierRoleIds) || 'не выбраны'} (🥇 → 🥈 → 🥉 → без тира)\n\n` +
@@ -852,6 +853,19 @@ function buildGatheringsTab(guild) {
           .setCustomId('admin:gathstats')
           .setPlaceholder('Канал статистики VZP')
           .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Куда архивировать ветки сборов** (форум: пост на каждый сбор, потом ветка удаляется)'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:gatharchive')
+          .setPlaceholder('Форум архива веток')
+          .addChannelTypes(ChannelType.GuildForum)
           .setMinValues(0)
           .setMaxValues(1),
       ),

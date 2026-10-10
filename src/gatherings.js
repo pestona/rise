@@ -278,7 +278,7 @@ async function createGatheringThread(client, guildId) {
       content:
         `Ветка сбора **${gathering.content || gathering.title}**.\n` +
         `В ветке только основа. Писать могут только выбранные роли.\n` +
-        `Ветка удалится сама <t:${deleteUnix}:R>.${main.length ? `\n${main.map((id) => `<@${id}>`).join(' ')}` : ''}`,
+        `Через 2 часа содержимое уйдёт в архив, а эта ветка удалится <t:${deleteUnix}:R>.${main.length ? `\n${main.map((id) => `<@${id}>`).join(' ')}` : ''}`,
       allowedMentions: { users: main },
     })
     .catch(() => null);
@@ -843,6 +843,110 @@ function gatheringThreadSources(gatherings) {
   return [gatherings?.active, ...(gatherings?.history || [])].filter((item) => item?.threadId);
 }
 
+async function fetchAllThreadMessages(thread) {
+  const collected = [];
+  let before;
+  while (collected.length < 300) {
+    const batch = await thread.messages.fetch({ limit: 100, before }).catch(() => null);
+    if (!batch?.size) break;
+    collected.push(...batch.values());
+    before = batch.last().id;
+    if (batch.size < 100) break;
+  }
+  return collected.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+}
+
+function formatArchiveMessage(message) {
+  const when = Math.floor(message.createdTimestamp / 1000);
+  const author = message.author?.id ? `<@${message.author.id}>` : 'неизвестно';
+  const text = String(message.content || '').trim();
+  const files = [...(message.attachments?.values() || [])].slice(0, 10);
+  const lines = [`**${author}** · <t:${when}:f>`];
+  if (text) lines.push(text);
+  if (!text && !files.length && message.embeds?.length) {
+    lines.push('_вложение / эмбед_');
+  }
+  return {
+    content: truncate(lines.join('\n'), 2000),
+    files: files.map((file) => ({ attachment: file.url, name: file.name })),
+  };
+}
+
+function archiveHeader(gathering) {
+  const when = gathering.timeAt || gathering.closedAt || gathering.startedAt;
+  const whenText = when ? `<t:${Math.floor(when / 1000)}:f>` : '—';
+  const main = gathering.main || [];
+  const bench = gathering.bench || [];
+  return truncate(
+    `## Сбор · ${gathering.content || gathering.title || 'основа'}\n` +
+      `Время: ${whenText}\n` +
+      `Основа (${main.length}/${gathering.maxMain || '—'}): ${
+        main.length ? main.map((id) => `<@${id}>`).join(' ') : 'пусто'
+      }\n` +
+      `Замена (${bench.length}): ${
+        bench.length ? bench.map((id) => `<@${id}>`).join(' ') : 'пусто'
+      }\n\n` +
+      `Ниже переписка из ветки основы. Сама ветка удалена.`,
+    2000,
+  );
+}
+
+async function archiveGatheringThread(client, guildId, gathering, thread) {
+  const forumId = store.getGuild(guildId).gatherings?.archiveChannelId;
+  if (!forumId) return true;
+
+  const forum = await client.channels.fetch(forumId).catch(() => null);
+  if (!forum || forum.type !== ChannelType.GuildForum) {
+    console.warn('Форум архива веток сборов не выбран или недоступен.');
+    return false;
+  }
+
+  const messages = await fetchAllThreadMessages(thread);
+  const title = truncate(
+    `${gathering.content || gathering.title || 'сбор'} · ${new Date(
+      gathering.timeAt || gathering.closedAt || Date.now(),
+    ).toLocaleString('ru-RU', {
+      timeZone: 'Europe/Kyiv',
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`,
+    100,
+  );
+
+  let post;
+  try {
+    post = await forum.threads.create({
+      name: title,
+      message: {
+        content: archiveHeader(gathering),
+        allowedMentions: { parse: [] },
+      },
+      reason: 'Архив ветки сбора',
+    });
+  } catch (error) {
+    console.warn('Не удалось создать пост архива сбора:', error.message);
+    return false;
+  }
+
+  for (const message of messages) {
+    const payload = formatArchiveMessage(message);
+    if (!payload.content && !payload.files.length) continue;
+    await post
+      .send({
+        content: payload.content,
+        files: payload.files,
+        allowedMentions: { parse: [] },
+      })
+      .catch((error) => {
+        console.warn('Не удалось скопировать сообщение в архив сбора:', error.message);
+      });
+  }
+
+  return true;
+}
+
 async function deleteExpiredGatheringThreads(client) {
   const now = Date.now();
   for (const guildId of store.getGuildIds()) {
@@ -875,7 +979,12 @@ async function deleteExpiredGatheringThreads(client) {
     for (const item of expired) {
       const thread = await client.channels.fetch(item.threadId).catch(() => null);
       if (thread?.isThread()) {
-        const deleted = await thread.delete('Ветка сбора удалена через 2 часа').then(
+        const archived = await archiveGatheringThread(client, guildId, item, thread).catch((error) => {
+          console.warn('Не удалось архивировать ветку сбора:', error.message);
+          return false;
+        });
+        if (!archived) continue;
+        const deleted = await thread.delete('Ветка сбора ушла в архив и удалена через 2 часа').then(
           () => true,
           (error) => {
             console.warn('Не удалось удалить ветку сбора:', error.message);
