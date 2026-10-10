@@ -38,7 +38,8 @@ function mapName(code) {
 }
 
 function mapTitle(event) {
-  return event?.mapLabel || event?.pointName || mapName(event?.map);
+  const title = event?.mapLabel || event?.pointName || mapName(event?.map);
+  return String(title || 'карта').split(/\s+[—-]\s+/).pop() || title || 'карта';
 }
 
 function normalizeNick(name) {
