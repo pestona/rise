@@ -15,6 +15,7 @@ const FAMILY_NAME = 'Trapaholic';
 const FAMILY_ALIASES = ['Trapaholic', 'TRAPA', 'RiseFam'].map(normalizeNick);
 const SERVER_ID = 25;
 const MATCH_MS = 2 * 60 * 60 * 1000;
+const MATCH_AFTER_START_MS = 45 * 60 * 1000;
 const NO_GATHERING_WAIT_MS = 20 * 60 * 1000;
 const POLL_MS = 30 * 1000;
 const RECENT_MS = 6 * 60 * 60 * 1000;
@@ -78,13 +79,71 @@ async function listFamilyEvents(limit = 50) {
   });
 }
 
-function eventDay(startedAt) {
-  return new Intl.DateTimeFormat('en-CA', {
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function readKyivParts(ms) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Kyiv',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date(startedAt));
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(ms));
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+    second: get('second') || 0,
+  };
+}
+
+function kyivOffsetMs(instant) {
+  const parts = readKyivParts(instant);
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - instant;
+}
+
+function kyivWallToUtc(year, month, day, hour, minute, second = 0) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
+  const utc = guess - kyivOffsetMs(guess);
+  const check = readKyivParts(utc);
+  if (check.hour === hour && check.day === day && check.minute === minute) return utc;
+  return guess - kyivOffsetMs(utc);
+}
+
+function vzpWallParts(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match) {
+    return {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4]),
+      minute: Number(match[5]),
+      second: Number(match[6] || 0),
+    };
+  }
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : readKyivParts(ms);
+}
+
+function eventClockAt(event) {
+  const parts = vzpWallParts(event?.startedAt || event?.date);
+  if (!parts) return 0;
+  return kyivWallToUtc(parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second);
+}
+
+function eventDay(startedAt) {
+  const parts = vzpWallParts(startedAt);
+  if (!parts) return '';
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
 }
 
 function formatDayLabel(day) {
@@ -93,11 +152,9 @@ function formatDayLabel(day) {
 }
 
 function formatEventTime(startedAt) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    timeZone: 'Europe/Kyiv',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(startedAt));
+  const parts = vzpWallParts(startedAt);
+  if (!parts) return '—';
+  return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 
 function formatEventWhen(startedAt) {
@@ -151,80 +208,104 @@ function gatheringMoment(gathering) {
   return Number(gathering?.timeAt || gathering?.closedAt || gathering?.startedAt || 0);
 }
 
-function withinMatchWindow(eventAt, gatheringAt, side) {
+function withinMatchWindow(eventAt, gatheringAt) {
   const diff = eventAt - gatheringAt;
-  if (diff < 0) return false;
-  return diff <= MATCH_MS;
+  return diff >= -MATCH_AFTER_START_MS && diff <= MATCH_MS;
 }
 
-function pickClosestGathering(gatherings, eventAt, side) {
+function pickLatestGathering(gatherings, eventAt) {
   let best = null;
-  let bestDiff = Infinity;
+  let bestAt = -1;
   for (const gathering of gatherings) {
     const gatheringAt = gatheringMoment(gathering);
-    if (!gatheringAt || !withinMatchWindow(eventAt, gatheringAt, side)) continue;
-    const diff = eventAt - gatheringAt;
-    if (diff < bestDiff) {
+    if (!gatheringAt || !withinMatchWindow(eventAt, gatheringAt)) continue;
+    if (gatheringAt >= bestAt) {
       best = gathering;
-      bestDiff = diff;
+      bestAt = gatheringAt;
     }
   }
   return best;
 }
 
-function memberKeys(member) {
-  return [member.displayName, member.user?.globalName, member.user?.username]
-    .filter(Boolean)
-    .map(normalizeNick);
+function cleanName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .trim();
 }
 
-function firstNameKey(name) {
-  const part = String(name || '')
-    .trim()
-    .split(/[\s_|.\-]+/)[0] || '';
-  return normalizeNick(part);
+function compactName(name) {
+  return cleanName(name).replace(/\s+/g, '');
 }
 
-function memberFirstNames(member) {
-  return [member.displayName, member.user?.globalName, member.user?.username]
-    .filter(Boolean)
-    .map(firstNameKey)
-    .filter(Boolean);
+function nameTokens(name) {
+  return cleanName(name)
+    .split(/\s+/)
+    .filter((token) => token && !['trapaholic', 'rise', 'risefam', 'trapa'].includes(token));
+}
+
+function tokensClose(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 3 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a))) return true;
+  return false;
+}
+
+function scoreName(charName, source) {
+  const left = compactName(charName);
+  const right = compactName(source);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+  if (left.length >= 4 && right.length >= 4 && (left.includes(right) || right.includes(left))) return 88;
+
+  const a = nameTokens(charName);
+  const b = nameTokens(source);
+  if (!a[0] || !b[0]) return 0;
+  const first = tokensClose(a[0], b[0]);
+  const second = a[1] && b[1] ? tokensClose(a[1], b[1]) : false;
+  if (first && second) return 92;
+  if (first && !a[1] && !b[1]) return 86;
+  if (first && (a.length === 1 || b.length === 1)) return 74;
+  return 0;
+}
+
+function scoreMember(charName, member) {
+  return Math.max(
+    0,
+    ...[member.displayName, member.user?.globalName, member.user?.username]
+      .filter(Boolean)
+      .map((source) => scoreName(charName, source)),
+  );
+}
+
+function bestMember(charName, members, minScore) {
+  let best = null;
+  let bestScore = 0;
+  for (const member of members) {
+    const score = scoreMember(charName, member);
+    if (score > bestScore) {
+      best = member;
+      bestScore = score;
+    }
+  }
+  return bestScore >= minScore ? best : null;
 }
 
 function findMember(guild, player, preferredIds = null) {
   const charName = typeof player === 'string' ? player : player?.charName;
-  const key = normalizeNick(charName);
-  if (!key) return null;
-  const exactMatches = guild.members.cache.filter((member) => memberKeys(member).includes(key));
-  if (exactMatches.size && preferredIds) {
-    const preferred = exactMatches.find((member) => preferredIds.has(member.id));
-    if (preferred) return preferred;
-  }
-  if (exactMatches.size === 1) return exactMatches.first();
-  if (exactMatches.size > 1) return exactMatches.first();
+  if (!compactName(charName)) return null;
 
-  const first = firstNameKey(charName);
-  if (first.length >= 3) {
-    const byFirst = guild.members.cache.filter((member) => memberFirstNames(member).includes(first));
-    if (byFirst.size === 1) return byFirst.first();
-    if (byFirst.size > 1 && preferredIds) {
-      const preferred = byFirst.filter((member) => preferredIds.has(member.id));
-      if (preferred.size === 1) return preferred.first();
-    }
-  }
+  const roster = preferredIds
+    ? [...preferredIds].map((id) => guild.members.cache.get(id)).filter(Boolean)
+    : [];
+  const fromRoster = bestMember(charName, roster, 70);
+  if (fromRoster) return fromRoster;
 
-  if (key.length < 5) return null;
-  const fuzzy = guild.members.cache.filter((member) =>
-    memberKeys(member).some(
-      (nick) => nick.length >= 5 && (nick.includes(key) || key.includes(nick)),
-    ),
-  );
-  if (fuzzy.size && preferredIds) {
-    const preferred = fuzzy.find((member) => preferredIds.has(member.id));
-    if (preferred) return preferred;
-  }
-  return fuzzy.first() || null;
+  const others = guild.members.cache.filter((member) => !preferredIds?.has(member.id));
+  return bestMember(charName, others.values(), 86);
 }
 
 function listKnownGatherings(settings) {
@@ -239,14 +320,16 @@ function listKnownGatherings(settings) {
 }
 
 function pickGatheringForEvent(settings, event) {
-  const eventAt = new Date(event.startedAt).getTime();
+  const eventAt = eventClockAt(event);
   const actual = eventSide(event);
   if (!eventAt || !actual) return { main: [], bench: [] };
 
-  const sameSide = listKnownGatherings(settings).filter(
-    (gathering) => gatheringSide(gathering) === actual,
-  );
-  return pickClosestGathering(sameSide, eventAt, actual) || { main: [], bench: [] };
+  const sameSide = listKnownGatherings(settings).filter((gathering) => {
+    if (gatheringSide(gathering) !== actual) return false;
+    if (gathering.vzpEventId && gathering.vzpEventId !== event.eventId) return false;
+    return true;
+  });
+  return pickLatestGathering(sameSide, eventAt) || { main: [], bench: [] };
 }
 
 function ourSidePlayers(event) {
@@ -411,6 +494,7 @@ function patchGathering(guildId, gatheringId, patch) {
 function eventFinished(event) {
   if (!event?.eventId) return false;
   if (event.endedAt) return true;
+  if (event.isWin === true || event.isWin === false) return true;
   return event.isAttackerWin === true || event.isAttackerWin === false;
 }
 
@@ -530,9 +614,20 @@ async function scanGuild(client, guildId) {
 
     const detailRaw = await getEvent(event.eventId).catch(() => null);
     const detail = detailRaw
-      ? { ...event, ...detailRaw, _role: event._role, mapLabel: event.mapLabel }
+      ? {
+          ...event,
+          ...detailRaw,
+          _role: event._role,
+          mapLabel: event.mapLabel,
+          endedAt: detailRaw.endedAt || event.endedAt,
+          isAttackerWin:
+            detailRaw.isAttackerWin === true || detailRaw.isAttackerWin === false
+              ? detailRaw.isAttackerWin
+              : event.isAttackerWin,
+          isWin: detailRaw.isWin === true || detailRaw.isWin === false ? detailRaw.isWin : event.isWin,
+        }
       : event;
-    if (!eventFinished(detail)) continue;
+    if (!eventFinished(detail) && !eventFinished(event)) continue;
 
     const currentSettings = store.getGuild(guildId);
     const gathering = pickGatheringForEvent(currentSettings, detail);
