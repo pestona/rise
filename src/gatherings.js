@@ -3,6 +3,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  EmbedBuilder,
   Events,
   MessageFlags,
   StringSelectMenuBuilder,
@@ -857,20 +858,54 @@ async function fetchAllThreadMessages(thread) {
   return collected.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
+function cloneEmbeds(message) {
+  const out = [];
+  for (const embed of [...(message.embeds || [])].slice(0, 10)) {
+    try {
+      out.push(EmbedBuilder.from(embed));
+    } catch {
+      const image = embed.image?.url || embed.thumbnail?.url;
+      const text = embed.description || embed.title;
+      if (!image && !text) continue;
+      const fallback = new EmbedBuilder();
+      if (text) fallback.setDescription(truncate(text, 4096));
+      if (image) fallback.setImage(image);
+      out.push(fallback);
+    }
+  }
+  return out;
+}
+
 function formatArchiveMessage(message) {
   const when = Math.floor(message.createdTimestamp / 1000);
   const author = message.author?.id ? `<@${message.author.id}>` : 'неизвестно';
   const text = String(message.content || '').trim();
-  const files = [...(message.attachments?.values() || [])].slice(0, 10);
+  const files = [...(message.attachments?.values() || [])].slice(0, 10).map((file) => ({
+    attachment: file.url,
+    name: file.name,
+  }));
+  const embeds = cloneEmbeds(message);
   const lines = [`**${author}** · <t:${when}:f>`];
   if (text) lines.push(text);
-  if (!text && !files.length && message.embeds?.length) {
-    lines.push('_вложение / эмбед_');
-  }
-  return {
+
+  const payload = {
     content: truncate(lines.join('\n'), 2000),
-    files: files.map((file) => ({ attachment: file.url, name: file.name })),
+    files,
+    embeds,
+    allowedMentions: { parse: [] },
   };
+
+  if (message.flags?.has(MessageFlags.IsComponentsV2) && message.components?.length) {
+    payload.components = message.components;
+    payload.flags = MessageFlags.IsComponentsV2;
+    delete payload.embeds;
+  } else if (message.components?.length) {
+    payload.components = message.components;
+  }
+
+  const stickers = [...(message.stickers?.values() || [])].map((sticker) => sticker.id).slice(0, 3);
+  if (stickers.length) payload.stickers = stickers;
+  return payload;
 }
 
 function archiveHeader(gathering) {
@@ -933,16 +968,12 @@ async function archiveGatheringThread(client, guildId, gathering, thread) {
 
   for (const message of messages) {
     const payload = formatArchiveMessage(message);
-    if (!payload.content && !payload.files.length) continue;
-    await post
-      .send({
-        content: payload.content,
-        files: payload.files,
-        allowedMentions: { parse: [] },
-      })
-      .catch((error) => {
-        console.warn('Не удалось скопировать сообщение в архив сбора:', error.message);
-      });
+    if (!payload.content && !payload.files.length && !payload.embeds?.length && !payload.components?.length) {
+      continue;
+    }
+    await post.send(payload).catch((error) => {
+      console.warn('Не удалось скопировать сообщение в архив сбора:', error.message);
+    });
   }
 
   return true;
