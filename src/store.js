@@ -70,6 +70,10 @@ function defaultGuild() {
     nicks: {
       entries: [],
     },
+    customPanels: {
+      selectedId: null,
+      items: [],
+    },
     positions: {
       imageUrl: '',
       slotCount: 10,
@@ -350,6 +354,19 @@ function getGuild(guildId) {
     } else if (!Array.isArray(db.settings.guilds[guildId].nicks.entries)) {
       db.settings.guilds[guildId].nicks.entries = [];
       dirty = true;
+    }
+    if (!db.settings.guilds[guildId].customPanels) {
+      db.settings.guilds[guildId].customPanels = defaultGuild().customPanels;
+      dirty = true;
+    } else {
+      if (!Array.isArray(db.settings.guilds[guildId].customPanels.items)) {
+        db.settings.guilds[guildId].customPanels.items = [];
+        dirty = true;
+      }
+      if (!Object.hasOwn(db.settings.guilds[guildId].customPanels, 'selectedId')) {
+        db.settings.guilds[guildId].customPanels.selectedId = null;
+        dirty = true;
+      }
     }
     if (!db.settings.guilds[guildId].gatherings) {
       db.settings.guilds[guildId].gatherings = defaultGuild().gatherings;

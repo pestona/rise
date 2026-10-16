@@ -13,7 +13,7 @@ const {
   StringSelectMenuOptionBuilder,
   UserSelectMenuBuilder,
 } = require('discord.js');
-const { ACCESS_ACTIONS, fillPlaceholders, statusLabel, truncate } = require('./util');
+const { ACCESS_ACTIONS, fillPlaceholders, formatHexColor, isHttpUrl, statusLabel, truncate } = require('./util');
 
 function v2Flags(ephemeral = false) {
   return ephemeral ? MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral : MessageFlags.IsComponentsV2;
@@ -24,6 +24,38 @@ function addBanner(container, url) {
   return container.addMediaGalleryComponents((gallery) =>
     gallery.addItems((item) => item.setURL(url).setDescription('Баннер заявок')),
   );
+}
+
+function addImages(container, urls, description) {
+  const items = [...new Set((urls || []).filter((url) => isHttpUrl(url)))].slice(0, 3);
+  if (!items.length) return container;
+  return container.addMediaGalleryComponents((gallery) => {
+    for (const url of items) {
+      gallery.addItems((item) => item.setURL(url).setDescription(description || 'Фото'));
+    }
+    return gallery;
+  });
+}
+
+function customPanelList(guild) {
+  return [...(guild.customPanels?.items || [])];
+}
+
+function selectedCustomPanel(guild) {
+  const items = customPanelList(guild);
+  return items.find((item) => item.id === guild.customPanels?.selectedId) || items[0] || null;
+}
+
+function buildCustomPanel(panel) {
+  const color = Number.isInteger(panel?.accentColor) ? panel.accentColor : 0x111111;
+  const title = String(panel?.title || panel?.name || 'Панель').trim() || 'Панель';
+  const body = String(panel?.body || '').trim();
+  const container = new ContainerBuilder().setAccentColor(color);
+  addImages(container, panel?.imageUrls, title);
+  container.addTextDisplayComponents((text) =>
+    text.setContent(truncate(body ? `## ${title}\n${body}` : `## ${title}`, 3900)),
+  );
+  return container;
 }
 
 function buildPublicPanel(guild) {
@@ -224,6 +256,16 @@ function buildAdminHub(guild, botName) {
           .setLabel('Ники')
           .setEmoji('🏷️')
           .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:custom')
+          .setLabel('Custom-panel')
+          .setEmoji('🖼️')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:afk')
+          .setLabel('AFK')
+          .setEmoji('💤')
+          .setStyle(ButtonStyle.Primary),
       ),
     );
 
@@ -238,9 +280,15 @@ function buildSummary(guild) {
     nicks: 'Ники и статики',
     gatherings: 'Сборы',
   };
+  const customNames = Object.fromEntries(
+    customPanelList(guild).map((item) => [`custom:${item.id}`, item.name || 'Custom-panel']),
+  );
   const published = (guild.panels || []).length
     ? guild.panels
-        .map((panel) => `• ${panelNames[panel.key] || panel.key}: ${channelMention(panel.channelId)}`)
+        .map((panel) => {
+          const name = panelNames[panel.key] || customNames[panel.key] || panel.key;
+          return `• ${name}: ${channelMention(panel.channelId)}`;
+        })
         .join('\n')
     : '• Нет опубликованных панелей';
   const watchedRoles = guild.logs?.watchedRoleIds?.length
@@ -287,8 +335,12 @@ function buildSummary(guild) {
     `### Общие логи\n` +
     `Выходы: ${channelMention(guild.logs?.leaveChannelId)}\n` +
     `Кики/баны: ${channelMention(guild.logs?.moderationChannelId)}\n` +
-    `AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
     `Роли выходов: ${watchedRoles}\n\n` +
+    `### AFK / Отпуск\n` +
+    `Логи: ${channelMention(guild.afk?.logChannelId)}\n` +
+    `Роль AFK: ${roleMention(guild.afk?.restRoleId)}\n` +
+    `Роль отпуска: ${roleMention(guild.afk?.vacationRoleId)}\n` +
+    `Вайтлист: ${roleMentions(guild.afk?.keepRoleIds)}\n\n` +
     `### Автопарк\n` +
     `Общее время аренды: **${guild.autopark?.durationMinutes || 60} мин.** · Машин: **${vehicles.length}**\n` +
     `${vehicleBindings}\n\n` +
@@ -469,10 +521,6 @@ function buildLogsTab(guild) {
       text.setContent(
         `Выходы: ${channelMention(logs.leaveChannelId)}\n` +
           `Кики и баны: ${channelMention(logs.moderationChannelId)}\n` +
-          `AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
-          `Роль AFK: ${roleMention(guild.afk?.restRoleId)}\n` +
-          `Роль отпуска: ${roleMention(guild.afk?.vacationRoleId)}\n` +
-          `Вайтлист ролей AFK: ${roleMentions(guild.afk?.keepRoleIds)}\n` +
           `Отслеживаемые роли: ${rolesText}`,
       ),
     )
@@ -508,15 +556,35 @@ function buildLogsTab(guild) {
           .setMaxValues(1),
       ),
     )
-    .addTextDisplayComponents((text) => text.setContent('**Канал логов AFK**'))
-    .addActionRowComponents((row) =>
-      row.setComponents(
-        new ChannelSelectMenuBuilder()
-          .setCustomId('admin:logs:afk')
-          .setPlaceholder('Канал логов AFK')
-          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-          .setMinValues(0)
-          .setMaxValues(1),
+    .addActionRowComponents((row) => row.setComponents(backToHubButton()));
+
+  return container;
+}
+
+function buildAfkTab(guild) {
+  const entries = activeAfkEntries(guild);
+  const afkEntries = entries.filter((entry) => afkKind(entry) === 'afk');
+  const vacationEntries = entries.filter((entry) => afkKind(entry) === 'vacation');
+  const published = (guild.panels || [])
+    .filter((item) => item.key === 'afk')
+    .map((item) => channelMention(item.channelId));
+  const publishedText = published.length ? published.join(', ') : 'ещё не опубликована';
+
+  const container = new ContainerBuilder().setAccentColor(0x000000);
+  container
+    .addTextDisplayComponents((text) => text.setContent('## AFK / Отпуск'))
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `При уходе бот снимает роли и выдаёт одну роль отдыха или отпуска. Вайтлист не трогает. По истечении времени роли возвращаются.\n\n` +
+          `Роль AFK: ${roleMention(guild.afk?.restRoleId)}\n` +
+          `Роль отпуска: ${roleMention(guild.afk?.vacationRoleId)}\n` +
+          `Вайтлист: ${roleMentions(guild.afk?.keepRoleIds)}\n` +
+          `Логи AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
+          `Панель: ${publishedText}\n\n` +
+          truncate(
+            `${formatAfkSection('Сейчас в AFK', afkEntries)}\n\n${formatAfkSection('Сейчас в отпуске', vacationEntries)}`,
+            1800,
+          ),
       ),
     )
     .addTextDisplayComponents((text) =>
@@ -555,8 +623,129 @@ function buildLogsTab(guild) {
           .setMaxValues(25),
       ),
     )
+    .addTextDisplayComponents((text) => text.setContent('**Канал логов AFK**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:afkchan:log')
+          .setPlaceholder('Канал логов AFK')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Опубликовать панель AFK**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:afksend')
+          .setPlaceholder('Канал панели AFK')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(1)
+          .setMaxValues(1),
+      ),
+    )
     .addActionRowComponents((row) => row.setComponents(backToHubButton()));
 
+  return container;
+}
+
+function buildCustomPanelsTab(guild) {
+  const items = customPanelList(guild);
+  const selected = selectedCustomPanel(guild);
+  const published = selected
+    ? (guild.panels || [])
+        .filter((item) => item.key === `custom:${selected.id}`)
+        .map((item) => channelMention(item.channelId))
+    : [];
+  const photos = selected?.imageUrls?.filter(Boolean).length || 0;
+  const preview = selected
+    ? `Сейчас: **${selected.name}**\n` +
+      `Заголовок: **${selected.title || selected.name}**\n` +
+      `Цвет: \`${formatHexColor(selected.accentColor)}\` · фото: **${photos}**\n` +
+      `Опубликована: ${published.length ? published.join(', ') : 'ещё нет'}\n\n` +
+      truncate(String(selected.body || '_Текст ещё не задан._'), 900)
+    : 'Панелей ещё нет — нажми **Создать**.';
+
+  const container = new ContainerBuilder().setAccentColor(
+    Number.isInteger(selected?.accentColor) ? selected.accentColor : 0x9b59b6,
+  );
+  container
+    .addTextDisplayComponents((text) => text.setContent('## Custom-panel'))
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `Свои панели: фото, текст и цвет. Создай, настрой и отправь в канал.\n\n${preview}`,
+      ),
+    );
+
+  if (items.length) {
+    container
+      .addTextDisplayComponents((text) => text.setContent('**Какую панель править**'))
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('admin:cpick')
+            .setPlaceholder('Выберите панель')
+            .addOptions(
+              items.slice(0, 25).map((item) =>
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(truncate(item.name || 'Панель', 100))
+                  .setDescription(truncate(item.title || 'без заголовка', 100))
+                  .setValue(item.id)
+                  .setDefault(item.id === selected?.id),
+              ),
+            ),
+        ),
+      );
+  }
+
+  container
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:cadd')
+          .setLabel('Создать')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(items.length >= 25),
+        new ButtonBuilder()
+          .setCustomId('admin:ctext')
+          .setLabel('Текст')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
+          .setCustomId('admin:cphoto')
+          .setLabel('Фото')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
+          .setCustomId('admin:ccolor')
+          .setLabel('Цвет')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
+          .setCustomId('admin:cdel')
+          .setLabel('Удалить')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!selected),
+      ),
+    );
+
+  if (selected) {
+    container
+      .addTextDisplayComponents((text) => text.setContent('**Куда отправить эту панель**'))
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new ChannelSelectMenuBuilder()
+            .setCustomId('admin:csend')
+            .setPlaceholder('Выберите канал')
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setMinValues(1)
+            .setMaxValues(1),
+        ),
+      );
+  }
+
+  container.addActionRowComponents((row) => row.setComponents(backToHubButton()));
   return container;
 }
 
@@ -1681,7 +1870,10 @@ module.exports = {
   buildAdminHub,
   buildSummary,
   buildPanelsTab,
+  buildCustomPanel,
+  buildCustomPanelsTab,
   buildLogsTab,
+  buildAfkTab,
   buildAutoparkPanel,
   buildAutoparkTab,
   buildPositionsPanel,

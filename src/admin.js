@@ -20,6 +20,8 @@ const {
   isType,
   hasAccess,
   isHttpUrl,
+  parseHexColor,
+  formatHexColor,
   parseBool,
   parseStyle,
   parseUserIds,
@@ -33,7 +35,9 @@ const {
   buildAdminHub,
   buildSummary,
   buildPanelsTab,
+  buildCustomPanelsTab,
   buildLogsTab,
+  buildAfkTab,
   buildAutoparkTab,
   buildGatheringsTab,
   buildActivityTab,
@@ -48,6 +52,7 @@ const {
 const { publishPanel, refreshAllPanels } = require('./tickets');
 const { publishAutoparkPanel, refreshAutoparkPanels } = require('./autopark');
 const { publishAfkPanel } = require('./afk');
+const { publishCustomPanel, refreshCustomPanels, unpublishCustomPanel } = require('./customPanels');
 const {
   getNickEntry,
   formatNickStatic,
@@ -197,7 +202,9 @@ function adminPayload(interaction, page) {
   if (page === 'vzp' || page === 'rp') container = buildTypePage(guild, page);
   else if (page === 'ticket') container = buildTicketTab(guild);
   else if (page === 'panels') container = buildPanelsTab(guild);
+  else if (page === 'custom') container = buildCustomPanelsTab(guild);
   else if (page === 'logs') container = buildLogsTab(guild);
+  else if (page === 'afk') container = buildAfkTab(guild);
   else if (page === 'autopark') container = buildAutoparkTab(guild);
   else if (page === 'gatherings') container = buildGatheringsTab(guild);
   else if (page === 'access') container = buildAccessTab(guild);
@@ -562,6 +569,101 @@ function textModal(guild) {
     );
 }
 
+function selectedCustomPanel(guildId) {
+  const guild = store.getGuild(guildId);
+  const items = guild.customPanels?.items || [];
+  return items.find((item) => item.id === guild.customPanels?.selectedId) || items[0] || null;
+}
+
+function customAddModal() {
+  return new ModalBuilder()
+    .setCustomId('admin:cadd:modal')
+    .setTitle('Новая custom-panel')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('name')
+          .setLabel('Название в админке')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80)
+          .setPlaceholder('Правила / Состав / Инфо'),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('title')
+          .setLabel('Заголовок на панели')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(120)
+          .setPlaceholder('Как будет выглядеть заголовок'),
+      ),
+    );
+}
+
+function customTextModal(panel) {
+  const title = new TextInputBuilder()
+    .setCustomId('title')
+    .setLabel('Заголовок')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(120);
+  if (panel?.title || panel?.name) title.setValue(truncate(panel.title || panel.name, 120));
+
+  const body = new TextInputBuilder()
+    .setCustomId('body')
+    .setLabel('Текст (можно с markdown)')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(4000);
+  if (panel?.body) body.setValue(truncate(panel.body, 4000));
+
+  return new ModalBuilder()
+    .setCustomId('admin:ctext:modal')
+    .setTitle('Текст панели')
+    .addComponents(
+      new ActionRowBuilder().addComponents(title),
+      new ActionRowBuilder().addComponents(body),
+    );
+}
+
+function customPhotoModal(panel) {
+  const urls = panel?.imageUrls || [];
+  const fields = [0, 1, 2].map((index) => {
+    const input = new TextInputBuilder()
+      .setCustomId(`url${index + 1}`)
+      .setLabel(`Фото ${index + 1} (ссылка)`)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(400)
+      .setPlaceholder('https://...  — пусто = убрать');
+    if (urls[index]) input.setValue(truncate(urls[index], 400));
+    return new ActionRowBuilder().addComponents(input);
+  });
+  return new ModalBuilder()
+    .setCustomId('admin:cphoto:modal')
+    .setTitle('Фото панели')
+    .addComponents(...fields);
+}
+
+function customColorModal(panel) {
+  return new ModalBuilder()
+    .setCustomId('admin:ccolor:modal')
+    .setTitle('Цвет панели')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('color')
+          .setLabel('Цвет полоски (#RRGGBB)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(7)
+          .setPlaceholder('#5865F2')
+          .setValue(formatHexColor(panel?.accentColor)),
+      ),
+    );
+}
+
 function cooldownModal(days) {
   return new ModalBuilder()
     .setCustomId('admin:cooldown:modal')
@@ -857,8 +959,10 @@ async function handleAdminButton(interaction) {
   if (action === 'check') return checkAllSettings(interaction);
   if (action === 'moveall') return moveEveryoneToAdmin(interaction);
   if (action === 'tab' && arg === 'panels') return showAdmin(interaction, 'panels');
+  if (action === 'tab' && arg === 'custom') return showAdmin(interaction, 'custom');
   if (action === 'tab' && arg === 'ticket') return showAdmin(interaction, 'ticket');
   if (action === 'tab' && arg === 'logs') return showAdmin(interaction, 'logs');
+  if (action === 'tab' && arg === 'afk') return showAdmin(interaction, 'afk');
   if (action === 'tab' && arg === 'autopark') return showAdmin(interaction, 'autopark');
   if (action === 'tab' && arg === 'summary') return showAdmin(interaction, 'summary');
   if (action === 'tab' && arg === 'gatherings') return showAdmin(interaction, 'gatherings');
@@ -1091,6 +1195,35 @@ async function handleAdminButton(interaction) {
     return showAdmin(interaction, arg);
   }
 
+  if (action === 'cadd') {
+    if ((store.getGuild(interaction.guildId).customPanels?.items || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 custom-panel.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(customAddModal());
+  }
+  if (action === 'ctext' || action === 'cphoto' || action === 'ccolor') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    if (action === 'ctext') return interaction.showModal(customTextModal(panel));
+    if (action === 'cphoto') return interaction.showModal(customPhotoModal(panel));
+    return interaction.showModal(customColorModal(panel));
+  }
+  if (action === 'cdel') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Нечего удалять.', flags: MessageFlags.Ephemeral });
+    }
+    await unpublishCustomPanel(interaction.client, interaction.guildId, panel.id);
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.customPanels) guild.customPanels = { selectedId: null, items: [] };
+      guild.customPanels.items = (guild.customPanels.items || []).filter((item) => item.id !== panel.id);
+      guild.customPanels.selectedId = guild.customPanels.items[0]?.id || null;
+    });
+    return showAdmin(interaction, 'custom');
+  }
+
   if (action === 'banner') return interaction.showModal(bannerModal(store.getGuild(interaction.guildId).bannerUrl));
   if (action === 'text') return interaction.showModal(textModal(store.getGuild(interaction.guildId)));
   if (action === 'cooldown') {
@@ -1254,7 +1387,15 @@ async function handleAdminSelect(interaction) {
         guild.afk.logChannelId = interaction.values[0] || null;
       }
     });
-    return showAdmin(interaction, 'logs');
+    return showAdmin(interaction, typeKey === 'afk' ? 'afk' : 'logs');
+  }
+
+  if (action === 'afkchan') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.afk) guild.afk = { entries: [], logChannelId: null, restRoleId: null, vacationRoleId: null, keepRoleIds: [] };
+      guild.afk.logChannelId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'afk');
   }
 
   if (action === 'afkset') {
@@ -1264,7 +1405,65 @@ async function handleAdminSelect(interaction) {
       if (typeKey === 'vacation') guild.afk.vacationRoleId = interaction.values[0] || null;
       if (typeKey === 'keep') guild.afk.keepRoleIds = [...interaction.values];
     });
-    return showAdmin(interaction, 'logs');
+    return showAdmin(interaction, 'afk');
+  }
+
+  if (action === 'afksend') {
+    const channelId = interaction.values[0];
+    const channel =
+      interaction.channels?.get(channelId) || (await interaction.guild.channels.fetch(channelId).catch(() => null));
+    if (!channel?.isTextBased()) {
+      return interaction.reply({ content: 'Нужен текстовый канал.', flags: MessageFlags.Ephemeral });
+    }
+    try {
+      const result = await publishAfkPanel(interaction, channel);
+      await interaction.update(adminPayload(interaction, 'afk'));
+      await interaction.followUp({
+        content: result.edited ? `Панель AFK обновлена в ${channel}.` : `Панель AFK опубликована в ${channel}.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (error) {
+      console.error(error);
+      return safeReply(interaction, {
+        content: 'Не удалось отправить панель AFK. Проверьте права бота в этом канале.',
+      });
+    }
+    return;
+  }
+
+  if (action === 'cpick') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.customPanels) guild.customPanels = { selectedId: null, items: [] };
+      guild.customPanels.selectedId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'custom');
+  }
+
+  if (action === 'csend') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    const channelId = interaction.values[0];
+    const channel =
+      interaction.channels?.get(channelId) || (await interaction.guild.channels.fetch(channelId).catch(() => null));
+    if (!channel?.isTextBased()) {
+      return interaction.reply({ content: 'Нужен текстовый канал.', flags: MessageFlags.Ephemeral });
+    }
+    try {
+      const result = await publishCustomPanel(interaction, channel, panel);
+      await interaction.update(adminPayload(interaction, 'custom'));
+      await interaction.followUp({
+        content: result.edited ? `Панель обновлена в ${channel}.` : `Панель опубликована в ${channel}.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (error) {
+      console.error(error);
+      return safeReply(interaction, {
+        content: 'Не удалось отправить панель. Проверьте права бота в этом канале.',
+      });
+    }
+    return;
   }
 
   if (action === 'staff') {
@@ -1546,6 +1745,93 @@ async function handleAdminModal(interaction) {
     upsertNick(interaction.guildId, userId, parsed.nick, parsed.staticId);
     await refreshNicksPanels(interaction.client, interaction.guildId).catch(() => null);
     return showAdmin(interaction, 'nicks');
+  }
+
+  if (action === 'cadd') {
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const title = interaction.fields.getTextInputValue('title').trim();
+    if (!name) {
+      return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    const settings = store.getGuild(interaction.guildId);
+    if ((settings.customPanels?.items || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 custom-panel.', flags: MessageFlags.Ephemeral });
+    }
+    if ((settings.customPanels?.items || []).some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+      return interaction.reply({ content: 'Панель с таким названием уже есть.', flags: MessageFlags.Ephemeral });
+    }
+    const id = shortId();
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.customPanels) guild.customPanels = { selectedId: null, items: [] };
+      guild.customPanels.items.push({
+        id,
+        name,
+        title: title || name,
+        body: '',
+        imageUrls: [],
+        accentColor: 0x111111,
+      });
+      guild.customPanels.selectedId = id;
+    });
+    return showAdmin(interaction, 'custom');
+  }
+
+  if (action === 'ctext') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    const title = interaction.fields.getTextInputValue('title').trim();
+    const body = interaction.fields.getTextInputValue('body').trim();
+    if (!title) {
+      return interaction.reply({ content: 'Заголовок не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.customPanels?.items || []).find((entry) => entry.id === panel.id);
+      if (!item) return;
+      item.title = title;
+      item.body = body;
+    });
+    await refreshCustomPanels(interaction.client, interaction.guildId, panel.id);
+    return showAdmin(interaction, 'custom');
+  }
+
+  if (action === 'cphoto') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    const urls = ['url1', 'url2', 'url3']
+      .map((field) => interaction.fields.getTextInputValue(field).trim())
+      .filter(Boolean);
+    if (urls.some((url) => !isHttpUrl(url))) {
+      return interaction.reply({ content: 'Нужны обычные http/https ссылки.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.customPanels?.items || []).find((entry) => entry.id === panel.id);
+      if (!item) return;
+      item.imageUrls = urls;
+    });
+    await refreshCustomPanels(interaction.client, interaction.guildId, panel.id);
+    return showAdmin(interaction, 'custom');
+  }
+
+  if (action === 'ccolor') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    const color = parseHexColor(interaction.fields.getTextInputValue('color'));
+    if (color == null) {
+      return interaction.reply({ content: 'Цвет пиши так: `#5865F2`.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.customPanels?.items || []).find((entry) => entry.id === panel.id);
+      if (!item) return;
+      item.accentColor = color;
+    });
+    await refreshCustomPanels(interaction.client, interaction.guildId, panel.id);
+    return showAdmin(interaction, 'custom');
   }
 
   if (action === 'gathadd') {

@@ -64,6 +64,18 @@ function isHttpUrl(value) {
   }
 }
 
+function parseHexColor(value) {
+  const raw = String(value || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
+  return Number.parseInt(raw, 16);
+}
+
+function formatHexColor(value) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0 || num > 0xffffff) return '#111111';
+  return `#${num.toString(16).padStart(6, '0')}`;
+}
+
 function parseBool(text) {
   const v = String(text || '')
     .trim()
@@ -152,6 +164,8 @@ module.exports = {
   shortId,
   truncate,
   isHttpUrl,
+  parseHexColor,
+  formatHexColor,
   parseBool,
   parseStyle,
   statusLabel,
