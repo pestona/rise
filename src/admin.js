@@ -1250,9 +1250,19 @@ async function handleAdminSelect(interaction) {
       if (typeKey === 'moderation') guild.logs.moderationChannelId = interaction.values[0] || null;
       if (typeKey === 'roles') guild.logs.watchedRoleIds = [...interaction.values];
       if (typeKey === 'afk') {
-        if (!guild.afk) guild.afk = { entries: [], logChannelId: null };
+        if (!guild.afk) guild.afk = { entries: [], logChannelId: null, restRoleId: null, vacationRoleId: null, keepRoleIds: [] };
         guild.afk.logChannelId = interaction.values[0] || null;
       }
+    });
+    return showAdmin(interaction, 'logs');
+  }
+
+  if (action === 'afkset') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.afk) guild.afk = { entries: [], logChannelId: null, restRoleId: null, vacationRoleId: null, keepRoleIds: [] };
+      if (typeKey === 'rest') guild.afk.restRoleId = interaction.values[0] || null;
+      if (typeKey === 'vacation') guild.afk.vacationRoleId = interaction.values[0] || null;
+      if (typeKey === 'keep') guild.afk.keepRoleIds = [...interaction.values];
     });
     return showAdmin(interaction, 'logs');
   }

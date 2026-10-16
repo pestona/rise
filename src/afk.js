@@ -4,6 +4,7 @@ const {
   Events,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
@@ -22,14 +23,66 @@ function panelPayload(settings) {
   };
 }
 
-function pruneExpired(guildId) {
-  const now = Date.now();
-  const current = store.getGuild(guildId).afk?.entries || [];
-  if (!current.some((entry) => entry.endsAt <= now)) return false;
-  store.updateGuild(guildId, (guild) => {
-    guild.afk.entries = (guild.afk.entries || []).filter((entry) => entry.endsAt > now);
+function restRoleForKind(settings, kind) {
+  if (kind === 'vacation') {
+    return settings.afk?.vacationRoleId || settings.afk?.restRoleId || null;
+  }
+  return settings.afk?.restRoleId || settings.afk?.vacationRoleId || null;
+}
+
+function canManageMemberRole(me, role) {
+  if (!me || !role || role.managed || role.id === role.guild.id) return false;
+  if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) return false;
+  return me.roles.highest.comparePositionTo(role) > 0;
+}
+
+async function applyAfkRoles(member, settings, kind) {
+  const restId = restRoleForKind(settings, kind);
+  if (!restId) throw new Error('no-role');
+  const restRole = member.guild.roles.cache.get(restId);
+  const me = member.guild.members.me;
+  if (!restRole || !canManageMemberRole(me, restRole)) throw new Error('no-perm');
+
+  const keep = new Set([member.guild.id, restId, ...(settings.afk?.keepRoleIds || [])]);
+  const savedRoleIds = [...member.roles.cache.keys()].filter((id) => {
+    if (id === member.guild.id) return false;
+    return canManageMemberRole(me, member.guild.roles.cache.get(id));
   });
-  return true;
+  const nextIds = [...member.roles.cache.keys()].filter((id) => {
+    if (id === member.guild.id) return false;
+    if (keep.has(id)) return true;
+    return !canManageMemberRole(me, member.guild.roles.cache.get(id));
+  });
+  if (!nextIds.includes(restId)) nextIds.push(restId);
+  await member.roles.set(nextIds, kind === 'vacation' ? 'Уход в отпуск' : 'Уход в AFK');
+  return { restRoleId: restId, savedRoleIds };
+}
+
+async function restoreAfkRoles(member, entry) {
+  const saved = [...new Set(entry?.savedRoleIds || [])].filter((id) => member.guild.roles.cache.has(id));
+  const restId = entry?.restRoleId;
+  if (restId && member.roles.cache.has(restId) && !saved.includes(restId)) {
+    await member.roles.remove(restId, 'Возврат из AFK/отпуска').catch(() => null);
+  }
+  const toAdd = saved.filter((id) => !member.roles.cache.has(id));
+  if (toAdd.length) {
+    await member.roles.add(toAdd, 'Возврат ролей после AFK/отпуска');
+  }
+}
+
+async function restoreAfkEntry(client, guildId, entry) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  const member = guild
+    ? await guild.members.fetch({ user: entry.userId, force: true }).catch(() => null)
+    : null;
+  if (!member) return true;
+  try {
+    await restoreAfkRoles(member, entry);
+    return true;
+  } catch (error) {
+    console.warn('Не удалось вернуть роли после AFK:', error.message);
+    return false;
+  }
 }
 
 function pad(value) {
@@ -46,6 +99,18 @@ function formatUntilLabel(endsAt) {
     at.getFullYear() === now.getFullYear();
   if (sameDay) return `до ${time}`;
   return `до ${pad(at.getDate())}.${pad(at.getMonth() + 1)} ${time}`;
+}
+
+function pruneExpired(guildId, keepUserIds = new Set()) {
+  const now = Date.now();
+  const current = store.getGuild(guildId).afk?.entries || [];
+  if (!current.some((entry) => entry.endsAt <= now && !keepUserIds.has(entry.userId))) return false;
+  store.updateGuild(guildId, (guild) => {
+    guild.afk.entries = (guild.afk.entries || []).filter(
+      (entry) => entry.endsAt > now || keepUserIds.has(entry.userId),
+    );
+  });
+  return true;
 }
 
 function withinAfkLimit(endsAt, now = Date.now()) {
@@ -124,7 +189,6 @@ async function sendAfkLog(client, guildId, entry) {
 }
 
 async function refreshAfkPanels(client, guildId) {
-  pruneExpired(guildId);
   const settings = store.getGuild(guildId);
   const payload = panelPayload(settings);
   const dead = [];
@@ -216,7 +280,6 @@ function joinModal(kind) {
 
 async function handleAfkButton(interaction) {
   const [, action, kind] = interaction.customId.split(':');
-  pruneExpired(interaction.guildId);
   const settings = store.getGuild(interaction.guildId);
   const current = (settings.afk?.entries || []).find((entry) => entry.userId === interaction.user.id);
 
@@ -231,12 +294,18 @@ async function handleAfkButton(interaction) {
         flags: MessageFlags.Ephemeral,
       });
     }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const restored = await restoreAfkEntry(interaction.client, interaction.guildId, current);
+    if (!restored) {
+      return interaction.editReply({
+        content: 'Не удалось вернуть роли. Проверь права бота и попробуй ещё раз.',
+      });
+    }
     store.updateGuild(interaction.guildId, (guild) => {
       guild.afk.entries = guild.afk.entries.filter((entry) => entry.userId !== interaction.user.id);
     });
-    await interaction.reply({
-      content: current.kind === 'vacation' ? 'Вы вышли из отпуска.' : 'Вы вышли с AFK.',
-      flags: MessageFlags.Ephemeral,
+    await interaction.editReply({
+      content: current.kind === 'vacation' ? 'Вы вышли из отпуска. Роли возвращены.' : 'Вы вышли с AFK. Роли возвращены.',
     });
     await refreshAfkPanels(interaction.client, interaction.guildId);
     return;
@@ -269,33 +338,73 @@ async function handleAfkModal(interaction) {
     });
   }
 
-  const now = Date.now();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const previous = (store.getGuild(interaction.guildId).afk?.entries || []).find(
+    (item) => item.userId === interaction.user.id,
+  );
+  if (previous) {
+    const restored = await restoreAfkEntry(interaction.client, interaction.guildId, previous);
+    if (!restored) {
+      return interaction.editReply({
+        content: 'Не удалось вернуть прошлые роли перед новым AFK. Проверь права бота и попробуй ещё раз.',
+      });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.afk.entries = (guild.afk.entries || []).filter((item) => item.userId !== interaction.user.id);
+    });
+  }
+
+  const member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
+  if (!member) {
+    return interaction.editReply({ content: 'Не удалось получить участника.' });
+  }
+
+  let roles;
+  try {
+    roles = await applyAfkRoles(member, store.getGuild(interaction.guildId), kind);
+  } catch (error) {
+    const text =
+      error.message === 'no-role'
+        ? 'Сначала выбери роль AFK/отпуска в админке, вкладка Логи.'
+        : 'Не удалось снять роли. Проверь, что у бота есть право Manage Roles и роль бота выше выдаваемой.';
+    return interaction.editReply({ content: text });
+  }
+
   const entry = {
     userId: interaction.user.id,
     kind,
     reason,
     durationLabel: parsed.label,
-    startedAt: now,
+    startedAt: Date.now(),
     endsAt: parsed.endsAt,
+    restRoleId: roles.restRoleId,
+    savedRoleIds: roles.savedRoleIds,
   };
   store.updateGuild(interaction.guildId, (guild) => {
     guild.afk.entries = (guild.afk.entries || []).filter((item) => item.userId !== interaction.user.id);
     guild.afk.entries.push(entry);
   });
 
-  await interaction.reply({
-    content: `Вы ушли в ${kindLabel(kind)} **${parsed.label}**. Причина: ${reason}`,
-    flags: MessageFlags.Ephemeral,
+  await interaction.editReply({
+    content: `Вы ушли в ${kindLabel(kind)} **${parsed.label}**. Роли сняты, причина: ${reason}`,
   });
   await sendAfkLog(interaction.client, interaction.guildId, entry);
   await refreshAfkPanels(interaction.client, interaction.guildId);
 }
 
 async function releaseExpiredAfk(client) {
+  const now = Date.now();
   for (const guildId of store.getGuildIds()) {
-    if (pruneExpired(guildId)) {
-      await refreshAfkPanels(client, guildId);
+    const expired = (store.getGuild(guildId).afk?.entries || []).filter((entry) => entry.endsAt <= now);
+    if (!expired.length) continue;
+    const keep = new Set();
+    for (const entry of expired) {
+      const restored = await restoreAfkEntry(client, guildId, entry);
+      if (!restored) keep.add(entry.userId);
     }
+    pruneExpired(guildId, keep);
+    await refreshAfkPanels(client, guildId);
   }
 }
 

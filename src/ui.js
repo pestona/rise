@@ -470,6 +470,9 @@ function buildLogsTab(guild) {
         `Выходы: ${channelMention(logs.leaveChannelId)}\n` +
           `Кики и баны: ${channelMention(logs.moderationChannelId)}\n` +
           `AFK: ${channelMention(guild.afk?.logChannelId)}\n` +
+          `Роль AFK: ${roleMention(guild.afk?.restRoleId)}\n` +
+          `Роль отпуска: ${roleMention(guild.afk?.vacationRoleId)}\n` +
+          `Вайтлист ролей AFK: ${roleMentions(guild.afk?.keepRoleIds)}\n` +
           `Отслеживаемые роли: ${rolesText}`,
       ),
     )
@@ -514,6 +517,42 @@ function buildLogsTab(guild) {
           .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
           .setMinValues(0)
           .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Роль AFK / отдыха** (выдаётся вместо снятых ролей)'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:afkset:rest')
+          .setPlaceholder('Роль AFK')
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Роль отпуска** (выдаётся вместо снятых ролей)'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:afkset:vacation')
+          .setPlaceholder('Роль отпуска')
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) =>
+      text.setContent('**Вайтлист** — эти роли бот не снимает на AFK/отпуске'),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('admin:afkset:keep')
+          .setPlaceholder('Роли, которые оставить')
+          .setMinValues(0)
+          .setMaxValues(25),
       ),
     )
     .addActionRowComponents((row) => row.setComponents(backToHubButton()));

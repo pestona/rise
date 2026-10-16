@@ -63,6 +63,9 @@ function defaultGuild() {
     afk: {
       entries: [],
       logChannelId: null,
+      restRoleId: null,
+      vacationRoleId: null,
+      keepRoleIds: [],
     },
     nicks: {
       entries: [],
@@ -326,6 +329,18 @@ function getGuild(guildId) {
       }
       if (!Object.hasOwn(db.settings.guilds[guildId].afk, 'logChannelId')) {
         db.settings.guilds[guildId].afk.logChannelId = null;
+        dirty = true;
+      }
+      if (!Object.hasOwn(db.settings.guilds[guildId].afk, 'restRoleId')) {
+        db.settings.guilds[guildId].afk.restRoleId = null;
+        dirty = true;
+      }
+      if (!Object.hasOwn(db.settings.guilds[guildId].afk, 'vacationRoleId')) {
+        db.settings.guilds[guildId].afk.vacationRoleId = null;
+        dirty = true;
+      }
+      if (!Array.isArray(db.settings.guilds[guildId].afk.keepRoleIds)) {
+        db.settings.guilds[guildId].afk.keepRoleIds = [];
         dirty = true;
       }
     }
