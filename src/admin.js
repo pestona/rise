@@ -1210,6 +1210,20 @@ async function handleAdminButton(interaction) {
     if (action === 'cphoto') return interaction.showModal(customPhotoModal(panel));
     return interaction.showModal(customColorModal(panel));
   }
+  if (action === 'cpos') {
+    const position = arg === 'bottom' ? 'bottom' : 'top';
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.customPanels?.items || []).find((entry) => entry.id === panel.id);
+      if (!item) return;
+      item.imagePosition = position;
+    });
+    await refreshCustomPanels(interaction.client, interaction.guildId, panel.id);
+    return showAdmin(interaction, 'custom');
+  }
   if (action === 'cdel') {
     const panel = selectedCustomPanel(interaction.guildId);
     if (!panel) {
@@ -1769,6 +1783,7 @@ async function handleAdminModal(interaction) {
         title: title || name,
         body: '',
         imageUrls: [],
+        imagePosition: 'top',
         accentColor: 0x111111,
       });
       guild.customPanels.selectedId = id;

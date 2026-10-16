@@ -46,15 +46,26 @@ function selectedCustomPanel(guild) {
   return items.find((item) => item.id === guild.customPanels?.selectedId) || items[0] || null;
 }
 
+function customImagePosition(panel) {
+  return panel?.imagePosition === 'bottom' ? 'bottom' : 'top';
+}
+
 function buildCustomPanel(panel) {
   const color = Number.isInteger(panel?.accentColor) ? panel.accentColor : 0x111111;
   const title = String(panel?.title || panel?.name || 'Панель').trim() || 'Панель';
   const body = String(panel?.body || '').trim();
   const container = new ContainerBuilder().setAccentColor(color);
-  addImages(container, panel?.imageUrls, title);
-  container.addTextDisplayComponents((text) =>
-    text.setContent(truncate(body ? `## ${title}\n${body}` : `## ${title}`, 3900)),
-  );
+  const addText = () =>
+    container.addTextDisplayComponents((text) =>
+      text.setContent(truncate(body ? `## ${title}\n${body}` : `## ${title}`, 3900)),
+    );
+  if (customImagePosition(panel) === 'bottom') {
+    addText();
+    addImages(container, panel?.imageUrls, title);
+  } else {
+    addImages(container, panel?.imageUrls, title);
+    addText();
+  }
   return container;
 }
 
@@ -659,10 +670,11 @@ function buildCustomPanelsTab(guild) {
         .map((item) => channelMention(item.channelId))
     : [];
   const photos = selected?.imageUrls?.filter(Boolean).length || 0;
+  const photoPlace = customImagePosition(selected) === 'bottom' ? 'внизу' : 'вверху';
   const preview = selected
     ? `Сейчас: **${selected.name}**\n` +
       `Заголовок: **${selected.title || selected.name}**\n` +
-      `Цвет: \`${formatHexColor(selected.accentColor)}\` · фото: **${photos}**\n` +
+      `Цвет: \`${formatHexColor(selected.accentColor)}\` · фото: **${photos}** (${photoPlace})\n` +
       `Опубликована: ${published.length ? published.join(', ') : 'ещё нет'}\n\n` +
       truncate(String(selected.body || '_Текст ещё не задан._'), 900)
     : 'Панелей ещё нет — нажми **Создать**.';
@@ -731,7 +743,20 @@ function buildCustomPanelsTab(guild) {
     );
 
   if (selected) {
+    const photoBottom = customImagePosition(selected) === 'bottom';
     container
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new ButtonBuilder()
+            .setCustomId('admin:cpos:top')
+            .setLabel('Фото сверху')
+            .setStyle(photoBottom ? ButtonStyle.Secondary : ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('admin:cpos:bottom')
+            .setLabel('Фото снизу')
+            .setStyle(photoBottom ? ButtonStyle.Success : ButtonStyle.Secondary),
+        ),
+      )
       .addTextDisplayComponents((text) => text.setContent('**Куда отправить эту панель**'))
       .addActionRowComponents((row) =>
         row.setComponents(
