@@ -595,7 +595,7 @@ function customAddModal() {
           .setLabel('Заголовок на панели')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
-          .setMaxLength(120)
+          .setMaxLength(400)
           .setPlaceholder('Как будет выглядеть заголовок'),
       ),
     );
@@ -607,8 +607,8 @@ function customTextModal(panel) {
     .setLabel('Заголовок')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
-    .setMaxLength(120);
-  if (panel?.title || panel?.name) title.setValue(truncate(panel.title || panel.name, 120));
+    .setMaxLength(400);
+  if (panel?.title || panel?.name) title.setValue(truncate(panel.title || panel.name, 400));
 
   const body = new TextInputBuilder()
     .setCustomId('body')
