@@ -160,6 +160,7 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
   const mapChannel = (id) => channelMap.get(id) || id;
   store.updateGuild(guildId, (settings) => {
     settings.staffRoleIds = (settings.staffRoleIds || []).map(mapRole);
+    settings.joinRoleId = mapRole(settings.joinRoleId);
     settings.logs.watchedRoleIds = settings.logs.watchedRoleIds.map(mapRole);
     for (const vehicle of settings.autopark.vehicles) {
       vehicle.roleIds = vehicle.roleIds.map(mapRole);

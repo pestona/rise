@@ -22,6 +22,7 @@ const { setupSecurity, setupBackupTimers } = require('./security');
 const { setupActivity } = require('./activity');
 const afk = require('./afk');
 const vzpStats = require('./vzpStats');
+const joinRole = require('./joinRole');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -109,6 +110,13 @@ const commands = [
         .setRequired(false),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName('роль')
+    .setDescription('Роль, которая выдаётся новичкам при входе на сервер')
+    .addRoleOption((option) =>
+      option.setName('роль').setDescription('Какую роль выдавать при входе').setRequired(true),
+    )
+    .toJSON(),
 ];
 
 async function registerCommands() {
@@ -142,6 +150,7 @@ gatherings.setupGatheringThreadGuard(client);
 vzpStats.setupVzpWatch(client);
 autopark.setupAutoparkTimers(client);
 afk.setupAfk(client);
+joinRole.setupJoinRole(client);
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Бот запущен как ${readyClient.user.tag}`);
@@ -161,6 +170,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'сбор') {
       await gatherings.handleGatheringCommand(interaction);
+      return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'роль') {
+      await joinRole.handleJoinRoleCommand(interaction);
       return;
     }
 

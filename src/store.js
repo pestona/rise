@@ -50,6 +50,7 @@ function defaultGuild() {
       '> В случае отказа можете подать заявку повторно через {cooldown} дн.',
     cooldownDays: 7,
     staffRoleIds: [],
+    joinRoleId: null,
     logs: {
       leaveChannelId: null,
       moderationChannelId: null,
@@ -229,6 +230,10 @@ function getGuild(guildId) {
       'После подачи заявка отправляется на рассмотрение персоналу.',
     );
     if (oldDescription !== db.settings.guilds[guildId].panelDescription) dirty = true;
+    if (!Object.hasOwn(db.settings.guilds[guildId], 'joinRoleId')) {
+      db.settings.guilds[guildId].joinRoleId = null;
+      dirty = true;
+    }
     if (!db.settings.guilds[guildId].types?.vzp || !db.settings.guilds[guildId].types?.rp) {
       db.settings.guilds[guildId].types = defaultGuild().types;
     }
