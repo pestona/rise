@@ -180,6 +180,11 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
         settings.access.roles[key] = settings.access.roles[key].map(mapRole);
       }
     }
+    if (settings.customPanels?.items) {
+      for (const panel of settings.customPanels.items) {
+        panel.mentionRoleIds = (panel.mentionRoleIds || []).map(mapRole);
+      }
+    }
     if (settings.afk) {
       settings.afk.logChannelId = mapChannel(settings.afk.logChannelId);
       settings.afk.restRoleId = mapRole(settings.afk.restRoleId);

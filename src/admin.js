@@ -612,10 +612,11 @@ function customTextModal(panel) {
 
   const body = new TextInputBuilder()
     .setCustomId('body')
-    .setLabel('Текст (можно с markdown)')
+    .setLabel('Текст (можно с markdown, {роли} = тег)')
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
-    .setMaxLength(4000);
+    .setMaxLength(4000)
+    .setPlaceholder('Напиши {роли} там, где должен быть тег роли');
   if (panel?.body) body.setValue(truncate(panel.body, 4000));
 
   return new ModalBuilder()
@@ -1453,6 +1454,20 @@ async function handleAdminSelect(interaction) {
     return showAdmin(interaction, 'custom');
   }
 
+  if (action === 'cmentions') {
+    const panel = selectedCustomPanel(interaction.guildId);
+    if (!panel) {
+      return interaction.reply({ content: 'Сначала создай панель.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.customPanels?.items || []).find((entry) => entry.id === panel.id);
+      if (!item) return;
+      item.mentionRoleIds = [...interaction.values];
+    });
+    await refreshCustomPanels(interaction.client, interaction.guildId, panel.id);
+    return showAdmin(interaction, 'custom');
+  }
+
   if (action === 'csend') {
     const panel = selectedCustomPanel(interaction.guildId);
     if (!panel) {
@@ -1784,6 +1799,7 @@ async function handleAdminModal(interaction) {
         body: '',
         imageUrls: [],
         imagePosition: 'top',
+        mentionRoleIds: [],
         accentColor: 0x111111,
       });
       guild.customPanels.selectedId = id;

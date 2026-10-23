@@ -50,10 +50,22 @@ function customImagePosition(panel) {
   return panel?.imagePosition === 'bottom' ? 'bottom' : 'top';
 }
 
+function customMentionText(panel) {
+  return (panel?.mentionRoleIds || []).filter(Boolean).map((id) => `<@&${id}>`).join(' ');
+}
+
+function fillCustomPanelBody(panel) {
+  const mentions = customMentionText(panel);
+  return String(panel?.body || '')
+    .replace(/\{роли\}/gi, mentions)
+    .replace(/\{role\}/gi, mentions)
+    .trim();
+}
+
 function buildCustomPanel(panel) {
   const color = Number.isInteger(panel?.accentColor) ? panel.accentColor : 0x111111;
   const title = String(panel?.title || panel?.name || 'Панель').trim() || 'Панель';
-  const body = String(panel?.body || '').trim();
+  const body = fillCustomPanelBody(panel);
   const container = new ContainerBuilder().setAccentColor(color);
   const addText = () =>
     container.addTextDisplayComponents((text) =>
@@ -675,6 +687,7 @@ function buildCustomPanelsTab(guild) {
     ? `Сейчас: **${selected.name}**\n` +
       `Заголовок: **${selected.title || selected.name}**\n` +
       `Цвет: \`${formatHexColor(selected.accentColor)}\` · фото: **${photos}** (${photoPlace})\n` +
+      `Тег ролей: ${roleMentions(selected.mentionRoleIds)}\n` +
       `Опубликована: ${published.length ? published.join(', ') : 'ещё нет'}\n\n` +
       truncate(String(selected.body || '_Текст ещё не задан._'), 900)
     : 'Панелей ещё нет — нажми **Создать**.';
@@ -686,7 +699,7 @@ function buildCustomPanelsTab(guild) {
     .addTextDisplayComponents((text) => text.setContent('## Custom-panel'))
     .addTextDisplayComponents((text) =>
       text.setContent(
-        `Свои панели: фото, текст и цвет. Создай, настрой и отправь в канал.\n\n${preview}`,
+        `Свои панели: фото, текст и цвет. Чтобы тегнуть роль — выбери её ниже и напиши в тексте \`{роли}\`.\n\n${preview}`,
       ),
     );
 
@@ -751,10 +764,22 @@ function buildCustomPanelsTab(guild) {
             .setCustomId('admin:cpos:top')
             .setLabel('Фото сверху')
             .setStyle(photoBottom ? ButtonStyle.Secondary : ButtonStyle.Success),
-          new ButtonBuilder()
-            .setCustomId('admin:cpos:bottom')
-            .setLabel('Фото снизу')
-            .setStyle(photoBottom ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('admin:cpos:bottom')
+          .setLabel('Фото снизу')
+          .setStyle(photoBottom ? ButtonStyle.Success : ButtonStyle.Secondary),
+        ),
+      )
+      .addTextDisplayComponents((text) =>
+        text.setContent('**Какие роли тегать** — в тексте поставь `{роли}`'),
+      )
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new RoleSelectMenuBuilder()
+            .setCustomId('admin:cmentions')
+            .setPlaceholder('Роли для тега')
+            .setMinValues(0)
+            .setMaxValues(25),
         ),
       )
       .addTextDisplayComponents((text) => text.setContent('**Куда отправить эту панель**'))
