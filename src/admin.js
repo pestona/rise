@@ -45,6 +45,7 @@ const {
   buildAccessTab,
   buildSecurityTab,
   buildTicketTab,
+  buildShopTab,
   buildTypePage,
   buildDeleteQuestionMenu,
   buildNicksTab,
@@ -67,6 +68,7 @@ const { closeActiveGathering, refreshGatheringPanels, refreshGatheringList, ensu
 const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
+const { addBalance, getBalance, listBalances, publishShopPanel, refreshShopPanels } = require('./shop');
 
 function deny(interaction) {
   return interaction.reply(
@@ -205,6 +207,13 @@ function adminPayload(interaction, page) {
   else if (page === 'custom') container = buildCustomPanelsTab(guild);
   else if (page === 'logs') container = buildLogsTab(guild);
   else if (page === 'afk') container = buildAfkTab(guild);
+  else if (page === 'shop' || page.startsWith('shop:')) {
+    const parts = page.split(':');
+    container = buildShopTab(guild, parts[1] || 'home', {
+      balances: listBalances(interaction.guildId),
+      page: Number(parts[2] || 0) || 0,
+    });
+  }
   else if (page === 'autopark') container = buildAutoparkTab(guild);
   else if (page === 'gatherings') container = buildGatheringsTab(guild);
   else if (page === 'access') container = buildAccessTab(guild);
@@ -228,6 +237,7 @@ function adminPayload(interaction, page) {
   return {
     components: [container],
     flags: v2Flags(ephemeralPanel),
+    allowedMentions: { parse: [] },
   };
 }
 
@@ -682,6 +692,123 @@ function familyModal(current) {
     );
 }
 
+function shopBannerModal(current) {
+  const urlInput = new TextInputBuilder()
+    .setCustomId('url')
+    .setLabel('Ссылка на фото магазина')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(400)
+    .setPlaceholder('https://...  — пусто = убрать');
+  if (current) urlInput.setValue(truncate(current, 400));
+  return new ModalBuilder()
+    .setCustomId('admin:shopbanner:modal')
+    .setTitle('Фото панели магазина')
+    .addComponents(new ActionRowBuilder().addComponents(urlInput));
+}
+
+function shopRateModal(shop) {
+  return new ModalBuilder()
+    .setCustomId('admin:shoprate:modal')
+    .setTitle('Голосовые баллы')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('voice')
+          .setLabel('Минут войса за 1 балл (0 = выкл.)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(6)
+          .setValue(String(shop.voiceMinutesPerPoint ?? 60)),
+      ),
+    );
+}
+
+function shopReportTypeModal(type) {
+  const nameInput = new TextInputBuilder()
+    .setCustomId('name')
+    .setLabel('Название')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(40)
+    .setPlaceholder('Контракты');
+  if (type?.name) nameInput.setValue(truncate(type.name, 40));
+  const pointsInput = new TextInputBuilder()
+    .setCustomId('points')
+    .setLabel('Баллы за принятие')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(4)
+    .setPlaceholder('2');
+  if (type && type.points != null) pointsInput.setValue(String(type.points));
+  const emojiInput = new TextInputBuilder()
+    .setCustomId('emoji')
+    .setLabel('Эмодзи (необязательно)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(32)
+    .setPlaceholder('📄');
+  if (type?.emoji) emojiInput.setValue(truncate(type.emoji, 32));
+  return new ModalBuilder()
+    .setCustomId(type ? `admin:shopredit:${type.id}` : 'admin:shoprtype:modal')
+    .setTitle(type ? 'Изменить отчёт' : 'Тип РП-отчёта')
+    .addComponents(
+      new ActionRowBuilder().addComponents(nameInput),
+      new ActionRowBuilder().addComponents(pointsInput),
+      new ActionRowBuilder().addComponents(emojiInput),
+    );
+}
+
+function shopItemModal() {
+  return new ModalBuilder()
+    .setCustomId('admin:shopadd:modal')
+    .setTitle('Новый товар')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('name')
+          .setLabel('Название')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('description')
+          .setLabel('Описание')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(100),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('price')
+          .setLabel('Цена в баллах')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(6)
+          .setPlaceholder('150'),
+      ),
+    );
+}
+
+function shopPointsModal(mode, userId) {
+  return new ModalBuilder()
+    .setCustomId(`admin:shoppts:${mode}:${userId}`)
+    .setTitle(mode === 'take' ? 'Забрать баллы' : 'Выдать баллы')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('amount')
+          .setLabel('Сколько баллов')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(7)
+          .setPlaceholder('10'),
+      ),
+    );
+}
+
 function cooldownModal(days) {
   return new ModalBuilder()
     .setCustomId('admin:cooldown:modal')
@@ -981,6 +1108,15 @@ async function handleAdminButton(interaction) {
   if (action === 'tab' && arg === 'ticket') return showAdmin(interaction, 'ticket');
   if (action === 'tab' && arg === 'logs') return showAdmin(interaction, 'logs');
   if (action === 'tab' && arg === 'afk') return showAdmin(interaction, 'afk');
+  if (action === 'tab' && arg === 'shop') {
+    const section = parts[3];
+    if (['photo', 'rates', 'items', 'points'].includes(section)) {
+      const pageNum = parts[4];
+      if (section === 'points' && pageNum != null) return showAdmin(interaction, `shop:points:${pageNum}`);
+      return showAdmin(interaction, `shop:${section}`);
+    }
+    return showAdmin(interaction, 'shop');
+  }
   if (action === 'tab' && arg === 'autopark') return showAdmin(interaction, 'autopark');
   if (action === 'tab' && arg === 'summary') return showAdmin(interaction, 'summary');
   if (action === 'tab' && arg === 'gatherings') return showAdmin(interaction, 'gatherings');
@@ -1261,6 +1397,70 @@ async function handleAdminButton(interaction) {
   if (action === 'family') {
     return interaction.showModal(familyModal(store.getGuild(interaction.guildId).familyName));
   }
+  if (action === 'shopbanner') {
+    return interaction.showModal(shopBannerModal(store.getGuild(interaction.guildId).shop?.bannerUrl));
+  }
+  if (action === 'shopbanneroff') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.bannerUrl = '';
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:photo');
+  }
+  if (action === 'shoprate') {
+    const shop = store.getGuild(interaction.guildId).shop || {};
+    return interaction.showModal(shopRateModal(shop));
+  }
+  if (action === 'shoprtype') {
+    if ((store.getGuild(interaction.guildId).shop?.reportTypes || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 типов РП.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(shopReportTypeModal());
+  }
+  if (action === 'shopredit') {
+    const settings = store.getGuild(interaction.guildId);
+    const types = settings.shop?.reportTypes || [];
+    const selected = types.find((type) => type.id === settings.shop?.selectedReportTypeId) || types[0];
+    if (!selected) {
+      return interaction.reply({ content: 'Сначала выбери тип отчёта.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(shopReportTypeModal(selected));
+  }
+  if (action === 'shoprtypedel') {
+    const settings = store.getGuild(interaction.guildId);
+    const types = settings.shop?.reportTypes || [];
+    const selected = types.find((type) => type.id === settings.shop?.selectedReportTypeId) || types[0];
+    if (!selected) {
+      return interaction.reply({ content: 'Нечего удалять.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.shop.reportTypes = (guild.shop.reportTypes || []).filter((type) => type.id !== selected.id);
+      guild.shop.selectedReportTypeId = guild.shop.reportTypes[0]?.id || null;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:rates');
+  }
+  if (action === 'shopadd') {
+    if ((store.getGuild(interaction.guildId).shop?.items || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 товаров.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(shopItemModal());
+  }
+  if (action === 'shopdel') {
+    const settings = store.getGuild(interaction.guildId);
+    const items = settings.shop?.items || [];
+    const selected = items.find((item) => item.id === settings.shop?.selectedItemId) || items[0];
+    if (!selected) {
+      return interaction.reply({ content: 'Нечего удалять.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.shop.items = (guild.shop.items || []).filter((item) => item.id !== selected.id);
+      guild.shop.selectedItemId = guild.shop.items[0]?.id || null;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:items');
+  }
   if (action === 'cooldown') {
     return interaction.showModal(cooldownModal(store.getGuild(interaction.guildId).cooldownDays));
   }
@@ -1466,6 +1666,76 @@ async function handleAdminSelect(interaction) {
     return;
   }
 
+  if (action === 'shopreview') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.reviewChannelId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'shop:rates');
+  }
+
+  if (action === 'shopbuyreview') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.purchaseChannelId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'shop:items');
+  }
+
+  if (action === 'shoprtypepick') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.selectedReportTypeId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'shop:rates');
+  }
+
+  if (action === 'shoppick') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.selectedItemId = interaction.values[0] || null;
+    });
+    return showAdmin(interaction, 'shop:items');
+  }
+
+  if (action === 'shoprole') {
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      const items = guild.shop.items || [];
+      const selected = items.find((item) => item.id === guild.shop.selectedItemId) || items[0];
+      if (selected) selected.roleId = interaction.values[0] || null;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:items');
+  }
+
+  if (action === 'shopgive' || action === 'shoptake') {
+    return interaction.showModal(shopPointsModal(action === 'shoptake' ? 'take' : 'give', interaction.values[0]));
+  }
+
+  if (action === 'shopsend') {
+    const channelId = interaction.values[0];
+    const channel =
+      interaction.channels?.get(channelId) || (await interaction.guild.channels.fetch(channelId).catch(() => null));
+    if (!channel?.isTextBased()) {
+      return interaction.reply({ content: 'Нужен текстовый канал.', flags: MessageFlags.Ephemeral });
+    }
+    try {
+      const result = await publishShopPanel(interaction, channel);
+      await interaction.update(adminPayload(interaction, 'shop'));
+      await interaction.followUp({
+        content: result.edited ? `Панель магазина обновлена в ${channel}.` : `Панель магазина опубликована в ${channel}.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (error) {
+      console.error(error);
+      return safeReply(interaction, {
+        content: 'Не удалось отправить панель магазина. Проверьте права бота в этом канале.',
+      });
+    }
+    return;
+  }
+
   if (action === 'cpick') {
     store.updateGuild(interaction.guildId, (guild) => {
       if (!guild.customPanels) guild.customPanels = { selectedId: null, items: [] };
@@ -1648,7 +1918,9 @@ async function handleAdminSelect(interaction) {
             ? await publishAfkPanel(interaction, channel)
             : panelKey === 'nicks'
               ? await publishNicksPanel(interaction, channel)
-              : await publishPanel(interaction, channel);
+              : panelKey === 'shop'
+                ? await publishShopPanel(interaction, channel)
+                : await publishPanel(interaction, channel);
       await interaction.update(adminPayload(interaction, 'panels'));
       await interaction.followUp({
         content: result.edited ? `Панель обновлена в ${channel}.` : `Панель опубликована в ${channel}.`,
@@ -1982,6 +2254,127 @@ async function handleAdminModal(interaction) {
     });
     await refreshAllPanels(interaction.client, interaction.guildId);
     return showAdmin(interaction, 'ticket');
+  }
+
+  if (action === 'shopbanner') {
+    const url = interaction.fields.getTextInputValue('url').trim();
+    if (url && !isHttpUrl(url)) {
+      return interaction.reply({ content: 'Нужна обычная http/https ссылка.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.bannerUrl = url;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:photo');
+  }
+
+  if (action === 'shoprate') {
+    const voice = Number(String(interaction.fields.getTextInputValue('voice').trim()).replace(',', '.'));
+    if (!Number.isFinite(voice) || voice < 0 || voice > 10080) {
+      return interaction.reply({ content: 'Минуты войса: число от 0 до 10080.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      guild.shop.voiceMinutesPerPoint = voice;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:rates');
+  }
+
+  if (action === 'shoprtype') {
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const points = Number(interaction.fields.getTextInputValue('points').trim());
+    const emoji = interaction.fields.getTextInputValue('emoji').trim();
+    if (!name) {
+      return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    if (!Number.isInteger(points) || points < 0 || points > 1000) {
+      return interaction.reply({ content: 'Баллы: целое число от 0 до 1000.', flags: MessageFlags.Ephemeral });
+    }
+    if ((store.getGuild(interaction.guildId).shop?.reportTypes || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 типов РП.', flags: MessageFlags.Ephemeral });
+    }
+    const id = shortId();
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      if (!Array.isArray(guild.shop.reportTypes)) guild.shop.reportTypes = [];
+      guild.shop.reportTypes.push({ id, name, points, emoji });
+      guild.shop.selectedReportTypeId = id;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:rates');
+  }
+
+  if (action === 'shopredit') {
+    const typeId = parts[2];
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const points = Number(interaction.fields.getTextInputValue('points').trim());
+    const emoji = interaction.fields.getTextInputValue('emoji').trim();
+    if (!name) {
+      return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    if (!Number.isInteger(points) || points < 0 || points > 1000) {
+      return interaction.reply({ content: 'Баллы: целое число от 0 до 1000.', flags: MessageFlags.Ephemeral });
+    }
+    const types = store.getGuild(interaction.guildId).shop?.reportTypes || [];
+    if (!types.some((type) => type.id === typeId)) {
+      return interaction.reply({ content: 'Этот тип отчёта уже недоступен.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const type = (guild.shop?.reportTypes || []).find((item) => item.id === typeId);
+      if (!type) return;
+      type.name = name;
+      type.points = points;
+      type.emoji = emoji;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:rates');
+  }
+
+  if (action === 'shopadd') {
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const description = interaction.fields.getTextInputValue('description').trim();
+    const price = Number(interaction.fields.getTextInputValue('price').trim());
+    if (!name) {
+      return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    if (!Number.isInteger(price) || price < 1 || price > 1000000) {
+      return interaction.reply({ content: 'Цена: целое число от 1 до 1000000.', flags: MessageFlags.Ephemeral });
+    }
+    if ((store.getGuild(interaction.guildId).shop?.items || []).length >= 25) {
+      return interaction.reply({ content: 'Максимум 25 товаров.', flags: MessageFlags.Ephemeral });
+    }
+    const id = shortId();
+    store.updateGuild(interaction.guildId, (guild) => {
+      if (!guild.shop) guild.shop = {};
+      if (!Array.isArray(guild.shop.items)) guild.shop.items = [];
+      guild.shop.items.push({ id, name, description, price, roleId: null });
+      guild.shop.selectedItemId = id;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:items');
+  }
+
+  if (action === 'shoppts') {
+    const mode = parts[2];
+    const userId = parts[3];
+    const amount = Number(interaction.fields.getTextInputValue('amount').trim());
+    if (!/^\d{17,20}$/.test(userId || '') || !Number.isInteger(amount) || amount < 1 || amount > 1000000) {
+      return interaction.reply({ content: 'Укажи целое число баллов от 1 до 1000000.', flags: MessageFlags.Ephemeral });
+    }
+    const next =
+      mode === 'take'
+        ? addBalance(interaction.guildId, userId, -Math.min(amount, getBalance(interaction.guildId, userId)))
+        : addBalance(interaction.guildId, userId, amount);
+    await showAdmin(interaction, 'shop:points');
+    return interaction.followUp({
+      content:
+        mode === 'take'
+          ? `Списано у <@${userId}>: **${amount}**. Сейчас: **${next}**.`
+          : `Начислено <@${userId}>: **${amount}**. Сейчас: **${next}**.`,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   if (action === 'family') {

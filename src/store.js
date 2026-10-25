@@ -76,6 +76,25 @@ function defaultGuild() {
       selectedId: null,
       items: [],
     },
+    shop: {
+      bannerUrl: '',
+      reviewChannelId: null,
+      purchaseChannelId: null,
+      reportPoints: 10,
+      voiceMinutesPerPoint: 60,
+      selectedItemId: null,
+      selectedReportTypeId: 'supply',
+      items: [],
+      reportTypes: [
+        { id: 'supply', name: 'Поставки', points: 2, emoji: '📦' },
+        { id: 'stash', name: 'Тайники', points: 3, emoji: '🧳' },
+        { id: 'workshop', name: 'Цеха', points: 3, emoji: '🏭' },
+        { id: 'dealer', name: 'Диллеры', points: 2, emoji: '💊' },
+        { id: 'island', name: 'ФЗ/Остров', points: 3, emoji: '🏝️' },
+        { id: 'contract', name: 'Контракты', points: 2, emoji: '📄' },
+        { id: 'drop', name: 'Дропол', points: 1, emoji: '🪂' },
+      ],
+    },
     positions: {
       imageUrl: '',
       slotCount: 10,
@@ -364,6 +383,41 @@ function getGuild(guildId) {
     } else if (!Array.isArray(db.settings.guilds[guildId].nicks.entries)) {
       db.settings.guilds[guildId].nicks.entries = [];
       dirty = true;
+    }
+    if (!db.settings.guilds[guildId].shop) {
+      db.settings.guilds[guildId].shop = defaultGuild().shop;
+      dirty = true;
+    } else {
+      const shop = db.settings.guilds[guildId].shop;
+      if (!Array.isArray(shop.items)) {
+        shop.items = [];
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'bannerUrl')) {
+        shop.bannerUrl = '';
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'reviewChannelId')) {
+        shop.reviewChannelId = null;
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'purchaseChannelId')) {
+        shop.purchaseChannelId = null;
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'reportPoints')) {
+        shop.reportPoints = 10;
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'voiceMinutesPerPoint')) {
+        shop.voiceMinutesPerPoint = 60;
+        dirty = true;
+      }
+      if (!Array.isArray(shop.reportTypes)) {
+        shop.reportTypes = defaultGuild().shop.reportTypes;
+        shop.selectedReportTypeId = shop.reportTypes[0]?.id || null;
+        dirty = true;
+      }
     }
     if (!db.settings.guilds[guildId].customPanels) {
       db.settings.guilds[guildId].customPanels = defaultGuild().customPanels;

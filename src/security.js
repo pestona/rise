@@ -180,6 +180,13 @@ function remapSettings(guildId, roleMap, channelMap, recreatedChannelIds) {
         settings.access.roles[key] = settings.access.roles[key].map(mapRole);
       }
     }
+    if (settings.shop) {
+      settings.shop.reviewChannelId = mapChannel(settings.shop.reviewChannelId);
+      settings.shop.purchaseChannelId = mapChannel(settings.shop.purchaseChannelId);
+      for (const item of settings.shop.items || []) {
+        if (item.roleId) item.roleId = mapRole(item.roleId);
+      }
+    }
     if (settings.customPanels?.items) {
       for (const panel of settings.customPanels.items) {
         panel.mentionRoleIds = (panel.mentionRoleIds || []).map(mapRole);

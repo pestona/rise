@@ -203,8 +203,34 @@ function setupActivity(client) {
   timer.unref?.();
 }
 
+function getUserVoiceMs(guildId, userId) {
+  let total = 0;
+  const guild = db.guilds[guildId];
+  for (const day of Object.values(guild?.days || {})) {
+    total += Number(day.users?.[userId]?.voiceMs || 0);
+  }
+  const startedAt = voiceSessions.get(sessionKey(guildId, userId));
+  if (startedAt) total += Math.max(0, Date.now() - startedAt);
+  return total;
+}
+
+function listVoiceUserIds(guildId) {
+  const ids = new Set();
+  const guild = db.guilds[guildId];
+  for (const day of Object.values(guild?.days || {})) {
+    for (const userId of Object.keys(day.users || {})) ids.add(userId);
+  }
+  const prefix = `${guildId}:`;
+  for (const key of voiceSessions.keys()) {
+    if (key.startsWith(prefix)) ids.add(key.slice(prefix.length));
+  }
+  return [...ids];
+}
+
 module.exports = {
   setupActivity,
   recordGathering,
   getActivityStats,
+  getUserVoiceMs,
+  listVoiceUserIds,
 };

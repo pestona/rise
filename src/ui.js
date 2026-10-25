@@ -183,6 +183,11 @@ const PUBLIC_PANELS = [
     label: 'Ники и статики',
     description: 'Привязка игрового ника и статика к Discord',
   },
+  {
+    key: 'shop',
+    label: 'Магазин',
+    description: 'Баллы, товары и РП-отчёты',
+  },
 ];
 
 function buildAdminHub(guild, botName) {
@@ -289,6 +294,11 @@ function buildAdminHub(guild, botName) {
           .setLabel('AFK')
           .setEmoji('💤')
           .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:shop')
+          .setLabel('Магазин')
+          .setEmoji('🛒')
+          .setStyle(ButtonStyle.Primary),
       ),
     );
 
@@ -302,6 +312,7 @@ function buildSummary(guild) {
     afk: 'AFK',
     nicks: 'Ники и статики',
     gatherings: 'Сборы',
+    shop: 'Магазин',
   };
   const customNames = Object.fromEntries(
     customPanelList(guild).map((item) => [`custom:${item.id}`, item.name || 'Custom-panel']),
@@ -1916,6 +1927,509 @@ function buildNicksTab(guild, options = {}) {
   return container;
 }
 
+function shopReportTypes(shop) {
+  return [...(shop?.reportTypes || [])].slice(0, 25);
+}
+
+function buildShopPanel(guild) {
+  const shop = guild.shop || {};
+  const items = (shop.items || []).slice(0, 25);
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  addBanner(container, shop.bannerUrl);
+  if (items.length) {
+    container.addActionRowComponents((row) =>
+      row.setComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('shop:pick')
+          .setPlaceholder('Выбрать товар')
+          .addOptions(
+            items.map((item) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(truncate(item.name || 'Товар', 100))
+                .setDescription(truncate(`${item.price} баллов${item.description ? ` · ${item.description}` : ''}`, 100))
+                .setValue(item.id),
+            ),
+          ),
+      ),
+    );
+  }
+  container.addActionRowComponents((row) =>
+    row.setComponents(
+      new ButtonBuilder().setCustomId('shop:balance').setLabel('Баланс').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('shop:report').setLabel('РП отчёты').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('shop:buy')
+        .setLabel('Купить')
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!items.length),
+    ),
+  );
+  return container;
+}
+
+function buildShopBalance(guild, balance) {
+  const shop = guild.shop || {};
+  const voice = Number(shop.voiceMinutesPerPoint || 0);
+  const types = shopReportTypes(shop);
+  const list = types.length
+    ? types.map((type) => `${type.emoji || '•'} ${type.name} — +${type.points}`).join('\n')
+    : 'РП-отчёты не настроены.';
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      `## Баланс\n` +
+        `У тебя **${balance}** баллов.\n\n` +
+        (voice > 0 ? `Голосовые: 1 балл за **${voice}** мин. в войсе.\n\n` : 'Голосовые баллы выключены.\n\n') +
+        `**РП-отчёты**\n${truncate(list, 1500)}`,
+    ),
+  );
+  return container;
+}
+
+function buildShopReportCatalog(guild) {
+  const types = shopReportTypes(guild.shop);
+  const list = types.length
+    ? types.map((type) => `${type.emoji || '•'} **${type.name}** — +${type.points} балл${type.points === 1 ? '' : type.points < 5 ? 'а' : 'ов'}`).join('\n')
+    : '_Типы мероприятий не настроены._';
+  const container = new ContainerBuilder().setAccentColor(0x2b2d31);
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      `## Каталог РП-мероприятий\n${truncate(list, 1800)}\n\n` +
+        (types.length ? 'Выберите тип мероприятия ниже, затем укажите ссылку на скриншот.' : ''),
+    ),
+  );
+  for (let i = 0; i < types.length; i += 3) {
+    const chunk = types.slice(i, i + 3);
+    container.addActionRowComponents((row) =>
+      row.setComponents(
+        chunk.map((type) => {
+          const button = new ButtonBuilder()
+            .setCustomId(`shop:rtype:${type.id}`)
+            .setLabel(truncate(type.name, 80))
+            .setStyle(ButtonStyle.Secondary);
+          if (type.emoji) button.setEmoji(type.emoji);
+          return button;
+        }),
+      ),
+    );
+  }
+  return container;
+}
+
+function buildShopReportReview(report, guild, extra = {}) {
+  const ping = extra.staffPing ? `${roleMentions(guild.staffRoleIds)} новый РП-отчёт\n` : '';
+  const status =
+    report.status === 'accepted' ? 'Принят' : report.status === 'rejected' ? 'Отклонён' : 'На проверке';
+  const container = new ContainerBuilder().setAccentColor(
+    report.status === 'accepted' ? 0x57f287 : report.status === 'rejected' ? 0xed4245 : 0xf1c40f,
+  );
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      truncate(
+        `${ping}## РП-отчёт${report.typeName ? ` · ${report.typeName}` : ''}\n` +
+          `**Кто:** <@${report.userId}>\n` +
+          `**Статус:** ${status}\n` +
+          (report.typeName ? `**Тип:** ${report.typeName}\n` : '') +
+          (report.imageUrl ? `**Скрин:** ${report.imageUrl}\n` : '') +
+          (report.comment ? `**Подпись:** ${report.comment}\n` : '') +
+          (report.reviewerId ? `**Проверил:** <@${report.reviewerId}>\n` : '') +
+          (report.status === 'accepted' && report.points ? `**Баллы:** +${report.points}` : report.points ? `**Баллы при принятии:** +${report.points}` : ''),
+        3900,
+      ),
+    ),
+  );
+  if (!extra.reviewed && report.status === 'pending') {
+    container.addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder().setCustomId(`shoprev:ok:${report.id}`).setLabel('Принять').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`shoprev:no:${report.id}`).setLabel('Отклонить').setStyle(ButtonStyle.Danger),
+      ),
+    );
+  }
+  return container;
+}
+
+function formatShopDateTime(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('day')}.${get('month')}.${get('year')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+function buildShopPurchaseReview(purchase, guild, extra = {}) {
+  const ping = extra.staffPing ? `${roleMentions(guild.staffRoleIds)} новая покупка\n` : '';
+  const status =
+    purchase.status === 'accepted' ? 'Принята' : purchase.status === 'rejected' ? 'Отклонена' : 'На проверке';
+  const container = new ContainerBuilder().setAccentColor(
+    purchase.status === 'accepted' ? 0x57f287 : purchase.status === 'rejected' ? 0xed4245 : 0xf1c40f,
+  );
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      truncate(
+        `${ping}## Покупка · ${purchase.itemName || 'Товар'}\n` +
+          `**Кто:** <@${purchase.userId}>\n` +
+          `**Статус:** ${status}\n` +
+          `**Товар:** ${purchase.itemName}\n` +
+          `**Цена:** ${purchase.price} баллов\n` +
+          (purchase.roleId ? `**Роль:** <@&${purchase.roleId}>\n` : '') +
+          (purchase.reviewerId ? `**Проверил:** <@${purchase.reviewerId}>` : ''),
+        3900,
+      ),
+    ),
+  );
+  if (!extra.reviewed && purchase.status === 'pending') {
+    container.addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder().setCustomId(`shopbuy:ok:${purchase.id}`).setLabel('Принять').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`shopbuy:no:${purchase.id}`).setLabel('Отклонить').setStyle(ButtonStyle.Danger),
+      ),
+    );
+  }
+  return container;
+}
+
+function buildShopReportNotice(kind, options = {}) {
+  const accepted = kind === 'accepted';
+  const typeName = options.typeName || 'РП-отчёт';
+  const container = new ContainerBuilder().setAccentColor(accepted ? 0x57f287 : 0xed4245);
+  container.addTextDisplayComponents((text) =>
+    text.setContent(
+      `## ${typeName} • ${accepted ? 'Одобрен' : 'Отклонён'}\n` +
+        (options.imageUrl ? `**Скрин:** [Открыть скрин](${options.imageUrl})\n` : '') +
+        `**Дата:** ${formatShopDateTime(options.at)}`,
+    ),
+  );
+  return container;
+}
+
+function backToShopButton() {
+  return new ButtonBuilder().setCustomId('admin:tab:shop').setLabel('К магазину').setStyle(ButtonStyle.Secondary);
+}
+
+function shopItemList(items, selected) {
+  if (!items.length) return '_Товаров нет._';
+  return items
+    .map(
+      (item) =>
+        `${item.id === selected?.id ? '•' : '·'} **${item.name}** — **${item.price}** б.` +
+        `${item.roleId ? ` · ${roleMention(item.roleId)}` : ''}`,
+    )
+    .join('\n');
+}
+
+function buildShopHome(shop, items) {
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container
+    .addTextDisplayComponents((text) => text.setContent('## Магазин'))
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `Фото панели: **${shop.bannerUrl ? 'стоит' : 'нет'}**\n` +
+          `Начисление: **${shopReportTypes(shop).length}** типов РП · **${shop.voiceMinutesPerPoint ?? 60} мин.** = 1 балл\n` +
+          `Товары: **${items.length}**\n` +
+          `Проверка отчётов: ${channelMention(shop.reviewChannelId)}\n` +
+          `Заявки на покупку: ${channelMention(shop.purchaseChannelId || shop.reviewChannelId)}`,
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:tab:shop:photo')
+          .setLabel('Фото панели')
+          .setEmoji('🖼️')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:shop:rates')
+          .setLabel('Начисление')
+          .setEmoji('📈')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:tab:shop:items')
+          .setLabel('Товары')
+          .setEmoji('🛒')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:tab:shop:points')
+          .setLabel('Баллы')
+          .setEmoji('💰')
+          .setStyle(ButtonStyle.Primary),
+        backToHubButton(),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Опубликовать панель магазина**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:shopsend')
+          .setPlaceholder('Канал панели магазина')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(1)
+          .setMaxValues(1),
+      ),
+    );
+  return container;
+}
+
+function buildShopPhoto(shop) {
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  addBanner(container, shop.bannerUrl);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Магазин · Фото панели\n` +
+          (shop.bannerUrl ? 'Сейчас фото стоит. Можно заменить или убрать.' : 'Фото ещё не задано.'),
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:shopbanner')
+          .setLabel(shop.bannerUrl ? 'Заменить фото' : 'Поставить фото')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:shopbanneroff')
+          .setLabel('Убрать фото')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!shop.bannerUrl),
+        backToShopButton(),
+      ),
+    );
+  return container;
+}
+
+function buildShopRates(shop) {
+  const voice = Number(shop.voiceMinutesPerPoint ?? 60);
+  const types = shopReportTypes(shop);
+  const selected = types.find((type) => type.id === shop.selectedReportTypeId) || types[0] || null;
+  const list = types.length
+    ? types
+        .map(
+          (type) =>
+            `${type.id === selected?.id ? '•' : '·'} ${type.emoji || ''} **${type.name}** — +${type.points}`,
+        )
+        .join('\n')
+    : '_Типов РП нет._';
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Магазин · Начисление\n` +
+          `Голосовые: ${voice > 0 ? `**1 балл = ${voice} мин.**` : '**выкл.**'}\n` +
+          `Канал проверки: ${channelMention(shop.reviewChannelId)}\n\n` +
+          `**РП-мероприятия**\n${truncate(list, 1500)}`,
+      ),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder().setCustomId('admin:shoprate').setLabel('Голосовые').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('admin:shoprtype')
+          .setLabel('Тип +')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(types.length >= 25),
+        new ButtonBuilder()
+          .setCustomId('admin:shopredit')
+          .setLabel('Изменить')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
+          .setCustomId('admin:shoprtypedel')
+          .setLabel('Тип −')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!selected),
+        backToShopButton(),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Канал проверки РП-отчётов**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:shopreview')
+          .setPlaceholder('Куда приходят отчёты')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    );
+
+  if (types.length) {
+    container
+      .addTextDisplayComponents((text) => text.setContent('**Какой тип править**'))
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('admin:shoprtypepick')
+            .setPlaceholder('Тип РП')
+            .addOptions(
+              types.map((type) =>
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(truncate(`${type.emoji ? `${type.emoji} ` : ''}${type.name}`, 100))
+                  .setDescription(truncate(`+${type.points} баллов`, 100))
+                  .setValue(type.id)
+                  .setDefault(type.id === selected?.id),
+              ),
+            ),
+        ),
+      );
+  }
+  return container;
+}
+
+function buildShopItems(shop, items, selected) {
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(`## Магазин · Товары\n${truncate(shopItemList(items, selected), 1800)}`),
+    )
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ButtonBuilder()
+          .setCustomId('admin:shopadd')
+          .setLabel('Товар +')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(items.length >= 25),
+        new ButtonBuilder()
+          .setCustomId('admin:shopdel')
+          .setLabel('Товар −')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!selected),
+        backToShopButton(),
+      ),
+    );
+
+  if (items.length) {
+    container
+      .addTextDisplayComponents((text) => text.setContent('**Какой товар править**'))
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('admin:shoppick')
+            .setPlaceholder('Товар')
+            .addOptions(
+              items.slice(0, 25).map((item) =>
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(truncate(item.name, 100))
+                  .setDescription(truncate(`${item.price} баллов`, 100))
+                  .setValue(item.id)
+                  .setDefault(item.id === selected?.id),
+              ),
+            ),
+        ),
+      )
+      .addTextDisplayComponents((text) =>
+        text.setContent(`**Роль за товар${selected ? ` «${selected.name}»` : ''}**`),
+      )
+      .addActionRowComponents((row) =>
+        row.setComponents(
+          new RoleSelectMenuBuilder()
+            .setCustomId('admin:shoprole')
+            .setPlaceholder('Роль при покупке, можно пусто')
+            .setMinValues(0)
+            .setMaxValues(1),
+        ),
+      );
+  }
+
+  container
+    .addTextDisplayComponents((text) => text.setContent('**Канал заявок на покупку**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('admin:shopbuyreview')
+          .setPlaceholder('Куда приходят покупки')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setMinValues(0)
+          .setMaxValues(1),
+      ),
+    );
+
+  return container;
+}
+
+function buildShopPoints(balances = [], page = 0) {
+  const pageSize = 15;
+  const totalPages = Math.max(1, Math.ceil(balances.length / pageSize));
+  const current = Math.min(Math.max(0, page), totalPages - 1);
+  const start = current * pageSize;
+  const shown = balances.slice(start, start + pageSize);
+  const list = shown.length
+    ? shown.map((entry, index) => `${start + index + 1}. <@${entry.userId}> — **${entry.balance}**`).join('\n')
+    : '_Пока ни у кого нет баллов._';
+  const container = new ContainerBuilder().setAccentColor(0xf1c40f);
+  container
+    .addTextDisplayComponents((text) =>
+      text.setContent(
+        `## Магазин · Баллы\n` +
+          `Всего с балансом: **${balances.length}**` +
+          (totalPages > 1 ? ` · стр. **${current + 1}/${totalPages}**` : '') +
+          `\n\n${truncate(list, 1800)}\n\nВыбери человека — откроется окно, сколько начислить или списать.`,
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Выдать баллы**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new UserSelectMenuBuilder()
+          .setCustomId('admin:shopgive')
+          .setPlaceholder('Кому начислить')
+          .setMinValues(1)
+          .setMaxValues(1),
+      ),
+    )
+    .addTextDisplayComponents((text) => text.setContent('**Забрать баллы**'))
+    .addActionRowComponents((row) =>
+      row.setComponents(
+        new UserSelectMenuBuilder()
+          .setCustomId('admin:shoptake')
+          .setPlaceholder('У кого списать')
+          .setMinValues(1)
+          .setMaxValues(1),
+      ),
+    )
+    .addActionRowComponents((row) => {
+      const buttons = [backToShopButton()];
+      if (totalPages > 1) {
+        buttons.unshift(
+          new ButtonBuilder()
+            .setCustomId(`admin:tab:shop:points:${Math.max(0, current - 1)}`)
+            .setLabel('Назад')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(current <= 0),
+          new ButtonBuilder()
+            .setCustomId(`admin:tab:shop:points:${current + 1}`)
+            .setLabel('Дальше')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(current + 1 >= totalPages),
+        );
+      }
+      return row.setComponents(buttons);
+    });
+  return container;
+}
+
+function buildShopTab(guild, section = 'home', extra = {}) {
+  const shop = guild.shop || {};
+  const items = shop.items || [];
+  const selected = items.find((item) => item.id === shop.selectedItemId) || items[0] || null;
+  if (section === 'photo') return buildShopPhoto(shop);
+  if (section === 'rates') return buildShopRates(shop);
+  if (section === 'items') return buildShopItems(shop, items, selected);
+  if (section === 'points') return buildShopPoints(extra.balances || [], extra.page || 0);
+  return buildShopHome(shop, items);
+}
+
 function familyLabel(guild) {
   return String(guild?.familyName || '').trim() || 'Trapaholic';
 }
@@ -1994,6 +2508,13 @@ module.exports = {
   buildAccessTab,
   buildSecurityTab,
   buildTicketTab,
+  buildShopPanel,
+  buildShopBalance,
+  buildShopReportCatalog,
+  buildShopReportReview,
+  buildShopPurchaseReview,
+  buildShopReportNotice,
+  buildShopTab,
   buildTypePage,
   buildDeleteQuestionMenu,
   buildApplicationContainer,

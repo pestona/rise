@@ -23,6 +23,7 @@ const { setupActivity } = require('./activity');
 const afk = require('./afk');
 const vzpStats = require('./vzpStats');
 const joinRole = require('./joinRole');
+const shop = require('./shop');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -139,7 +140,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message],
 });
 
 setupMemberLogs(client);
@@ -151,6 +152,7 @@ vzpStats.setupVzpWatch(client);
 autopark.setupAutoparkTimers(client);
 afk.setupAfk(client);
 joinRole.setupJoinRole(client);
+shop.setupShop(client);
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Бот запущен как ${readyClient.user.tag}`);
@@ -208,6 +210,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('afk:modal')) {
       await afk.handleAfkModal(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === 'shop:pick') {
+      await shop.handleShopSelect(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('shop:')) {
+      await shop.handleShopButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('shop:rmodal:')) {
+      await shop.handleShopReportModal(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('shoprev:')) {
+      await shop.handleShopReview(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('shopbuy:')) {
+      await shop.handleShopPurchaseReview(interaction);
       return;
     }
 
