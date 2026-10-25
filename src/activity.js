@@ -74,7 +74,12 @@ function sessionKey(guildId, userId) {
 }
 
 function isTrackedVoice(state) {
-  return Boolean(state.channelId && state.channelId !== state.guild.afkChannelId);
+  return Boolean(
+    state.channelId &&
+      state.channelId !== state.guild.afkChannelId &&
+      !state.selfDeaf &&
+      !state.serverDeaf,
+  );
 }
 
 function flushSession(guildId, userId, now = Date.now()) {
@@ -180,7 +185,9 @@ function setupActivity(client) {
       for (const channel of guild.channels.cache.values()) {
         if (!channel.isVoiceBased() || channel.id === guild.afkChannelId) continue;
         for (const member of channel.members.values()) {
-          if (!member.user.bot) voiceSessions.set(sessionKey(guild.id, member.id), now);
+          if (!member.user.bot && isTrackedVoice(member.voice)) {
+            voiceSessions.set(sessionKey(guild.id, member.id), now);
+          }
         }
       }
     }
