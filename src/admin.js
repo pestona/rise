@@ -665,6 +665,23 @@ function customColorModal(panel) {
     );
 }
 
+function familyModal(current) {
+  return new ModalBuilder()
+    .setCustomId('admin:family:modal')
+    .setTitle('Название семьи')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('name')
+          .setLabel('Как писать семью в ЛС по заявкам')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(60)
+          .setValue(truncate(current || 'Trapaholic', 60)),
+      ),
+    );
+}
+
 function cooldownModal(days) {
   return new ModalBuilder()
     .setCustomId('admin:cooldown:modal')
@@ -1241,6 +1258,9 @@ async function handleAdminButton(interaction) {
 
   if (action === 'banner') return interaction.showModal(bannerModal(store.getGuild(interaction.guildId).bannerUrl));
   if (action === 'text') return interaction.showModal(textModal(store.getGuild(interaction.guildId)));
+  if (action === 'family') {
+    return interaction.showModal(familyModal(store.getGuild(interaction.guildId).familyName));
+  }
   if (action === 'cooldown') {
     return interaction.showModal(cooldownModal(store.getGuild(interaction.guildId).cooldownDays));
   }
@@ -1961,6 +1981,17 @@ async function handleAdminModal(interaction) {
       guild.panelDescription = interaction.fields.getTextInputValue('description').trim();
     });
     await refreshAllPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'ticket');
+  }
+
+  if (action === 'family') {
+    const name = interaction.fields.getTextInputValue('name').trim();
+    if (!name) {
+      return interaction.reply({ content: 'Название семьи не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      guild.familyName = name;
+    });
     return showAdmin(interaction, 'ticket');
   }
 

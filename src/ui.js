@@ -1454,6 +1454,7 @@ function buildTicketTab(guild) {
       text.setContent(
         `Отдел настроек заявок: оформление, набор, роли, каналы и вопросы.\n\n` +
           `GIF: ${guild.bannerUrl ? 'установлен' : 'не задан'}\n` +
+          `Семья: **${guild.familyName || 'Trapaholic'}**\n` +
           `Персонал: ${roleMentions(guild.staffRoleIds)}\n` +
           `Логи ${vzp.label}: ${channelMention(vzp.logChannelId)} · ` +
           `логи ${rp.label}: ${channelMention(rp.logChannelId)}\n` +
@@ -1467,6 +1468,7 @@ function buildTicketTab(guild) {
       row.setComponents(
         new ButtonBuilder().setCustomId('admin:banner').setLabel('GIF по ссылке').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('admin:text').setLabel('Текст панели').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('admin:family').setLabel('Семья').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('admin:cooldown').setLabel('Кулдаун').setStyle(ButtonStyle.Secondary),
         backToHubButton(),
       ),
@@ -1914,6 +1916,62 @@ function buildNicksTab(guild, options = {}) {
   return container;
 }
 
+function familyLabel(guild) {
+  return String(guild?.familyName || '').trim() || 'Trapaholic';
+}
+
+function buildTicketNotice(kind, options = {}) {
+  const family = options.familyName || 'Trapaholic';
+  const typeLabel = options.typeLabel ? ` **${options.typeLabel}**` : '';
+  const admin = options.adminId ? `<@${options.adminId}>` : '—';
+  const when = options.at
+    ? `<t:${Math.floor(options.at / 1000)}:f> · <t:${Math.floor(options.at / 1000)}:R>`
+    : null;
+  const styles = {
+    submitted: { color: 0x5865f2, title: 'Заявка отправлена' },
+    interview: { color: 0xf1c40f, title: 'Обзвон' },
+    voice: { color: 0xf1c40f, title: 'Вызов на обзвон' },
+    rejected: { color: 0xed4245, title: 'Вердикт по заявке' },
+    accepted: { color: 0x57f287, title: 'Вердикт по заявке' },
+  };
+  const style = styles[kind] || styles.submitted;
+  let body = `## ${style.title}\n`;
+
+  if (kind === 'submitted') {
+    body +=
+      `Заявка${typeLabel} в семью **${family}** отправлена.\n` +
+      `Ожидай ответа администрации. Мы свяжемся в ближайшее время.`;
+  } else if (kind === 'interview') {
+    body +=
+      `Твою заявку${typeLabel} в семью **${family}** приняли на обзвон.\n\n` +
+      (when ? `**Время:** ${when}\n` : '') +
+      (options.channelId ? `**Канал:** <#${options.channelId}>\n` : '') +
+      `**Администратор:** ${admin}\n\n` +
+      `Если неудобно пройти обзвон — напиши администратору.`;
+  } else if (kind === 'voice') {
+    body +=
+      `Тебя вызвали на обзвон по заявке${typeLabel} в семью **${family}**.\n\n` +
+      (options.channelId ? `**Канал:** <#${options.channelId}>\n` : '') +
+      `**Администратор:** ${admin}\n\n` +
+      `Зайди в голосовой канал. Если неудобно — напиши администратору.`;
+  } else if (kind === 'rejected') {
+    body +=
+      `Твоя заявка${typeLabel} в семью **${family}** отклонена.\n\n` +
+      `**Причина:** ${options.reason || 'не указана'}\n` +
+      `**Администратор:** ${admin}`;
+  } else if (kind === 'accepted') {
+    body +=
+      `Твоя заявка${typeLabel} в семью **${family}** одобрена.\n` +
+      `Поздравляем!\n\n` +
+      `**Администратор:** ${admin}` +
+      (options.roleId ? `\n**Роль:** <@&${options.roleId}>` : '');
+  }
+
+  const container = new ContainerBuilder().setAccentColor(style.color);
+  container.addTextDisplayComponents((text) => text.setContent(truncate(body, 3900)));
+  return container;
+}
+
 module.exports = {
   v2Flags,
   buildPublicPanel,
@@ -1939,6 +1997,8 @@ module.exports = {
   buildTypePage,
   buildDeleteQuestionMenu,
   buildApplicationContainer,
+  buildTicketNotice,
+  familyLabel,
   buildAfkPanel,
   buildAfkList,
   buildAfkLog,

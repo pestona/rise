@@ -49,6 +49,7 @@ function defaultGuild() {
       'Каждое открытие набора сопровождается тегами в этом канале.\n\n' +
       '> В случае отказа можете подать заявку повторно через {cooldown} дн.',
     cooldownDays: 7,
+    familyName: 'Trapaholic',
     staffRoleIds: [],
     joinRoleId: null,
     logs: {
@@ -230,6 +231,10 @@ function getGuild(guildId) {
       'После подачи заявка отправляется на рассмотрение персоналу.',
     );
     if (oldDescription !== db.settings.guilds[guildId].panelDescription) dirty = true;
+    if (!Object.hasOwn(db.settings.guilds[guildId], 'familyName') || !db.settings.guilds[guildId].familyName) {
+      db.settings.guilds[guildId].familyName = 'Trapaholic';
+      dirty = true;
+    }
     if (!Object.hasOwn(db.settings.guilds[guildId], 'joinRoleId')) {
       db.settings.guilds[guildId].joinRoleId = null;
       dirty = true;

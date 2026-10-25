@@ -19,7 +19,33 @@ const {
   canReview,
   slugPart,
 } = require('./util');
-const { v2Flags, buildPublicPanel, buildApplicationContainer } = require('./ui');
+const { v2Flags, buildPublicPanel, buildApplicationContainer, buildTicketNotice, familyLabel } = require('./ui');
+
+function noticePayload(kind, settings, extra = {}) {
+  return {
+    components: [
+      buildTicketNotice(kind, {
+        familyName: familyLabel(settings),
+        typeLabel: extra.typeLabel,
+        adminId: extra.adminId,
+        at: extra.at,
+        channelId: extra.channelId,
+        reason: extra.reason,
+        roleId: extra.roleId,
+      }),
+    ],
+    flags: v2Flags(false),
+    allowedMentions: { parse: [] },
+  };
+}
+
+async function notifyApplicant(client, userId, payload) {
+  const user = await client.users.fetch(userId).catch(() => null);
+  if (!user) return;
+  await user.send(payload).catch((error) => {
+    console.warn(`Не удалось отправить ЛС по заявке ${userId}:`, error.message);
+  });
+}
 
 async function refreshAllPanels(client, guildId) {
   const settings = store.getGuild(guildId);
@@ -308,6 +334,12 @@ async function handleApplyModal(interaction) {
     reviewMessageId: sent.id,
   });
 
+  await notifyApplicant(
+    interaction.client,
+    interaction.user.id,
+    noticePayload('submitted', settings, { typeLabel: type.label }),
+  );
+
   return interaction.reply({
     content: `Заявка **${type.label}** отправлена. Обычно её смотрят в течение 1–2 дней.`,
     flags: MessageFlags.Ephemeral,
@@ -461,6 +493,15 @@ async function handleReviewVoiceSelect(interaction) {
         roles: [],
       },
     });
+    await notifyApplicant(
+      interaction.client,
+      app.userId,
+      noticePayload('voice', settings, {
+        typeLabel: settings.types[app.type]?.label,
+        adminId: interaction.user.id,
+        channelId: voiceChannel.id,
+      }),
+    );
   } catch (error) {
     console.warn('Не удалось отправить вызов на обзвон:', error.message);
     return interaction.update({
@@ -524,6 +565,16 @@ async function moveToInterview(interaction, app) {
     statusText: `На обзвоне · ${createdChannel}`,
     suppressActions: true,
   });
+  await notifyApplicant(
+    interaction.client,
+    app.userId,
+    noticePayload('interview', settings, {
+      typeLabel: type.label,
+      adminId: interaction.user.id,
+      at: updated.interviewAt,
+      channelId: createdChannel.id,
+    }),
+  );
   await interaction.followUp({
     content: `Канал обзвона создан: ${createdChannel}`,
     flags: MessageFlags.Ephemeral,
@@ -567,6 +618,15 @@ async function acceptApplication(interaction, app) {
     archiveThread: resultThread,
   });
 
+  await notifyApplicant(
+    interaction.client,
+    app.userId,
+    noticePayload('accepted', settings, {
+      typeLabel: type.label,
+      adminId: interaction.user.id,
+      roleId: member && type.roleId ? type.roleId : null,
+    }),
+  );
   await interaction.followUp({
     content:
       `Заявка #${app.number} принята. ${roleNote}` +
@@ -746,6 +806,15 @@ async function handleRejectModal(interaction) {
     archiveThread: resultThread,
   });
 
+  await notifyApplicant(
+    interaction.client,
+    app.userId,
+    noticePayload('rejected', settings, {
+      typeLabel: type.label,
+      adminId: interaction.user.id,
+      reason,
+    }),
+  );
   await interaction.followUp({
     content:
       `Заявка #${app.number} отклонена.` +
