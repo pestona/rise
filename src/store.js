@@ -82,6 +82,7 @@ function defaultGuild() {
       purchaseChannelId: null,
       reportPoints: 10,
       voiceMinutesPerPoint: 60,
+      tagVoiceMultiplier: 1.5,
       selectedItemId: null,
       selectedReportTypeId: 'supply',
       items: [],
@@ -393,6 +394,16 @@ function getGuild(guildId) {
         shop.items = [];
         dirty = true;
       }
+      for (const item of shop.items) {
+        if (!Object.hasOwn(item, 'enabled')) {
+          item.enabled = true;
+          dirty = true;
+        }
+        if (!Object.hasOwn(item, 'stock')) {
+          item.stock = null;
+          dirty = true;
+        }
+      }
       if (!Object.hasOwn(shop, 'bannerUrl')) {
         shop.bannerUrl = '';
         dirty = true;
@@ -411,6 +422,10 @@ function getGuild(guildId) {
       }
       if (!Object.hasOwn(shop, 'voiceMinutesPerPoint')) {
         shop.voiceMinutesPerPoint = 60;
+        dirty = true;
+      }
+      if (!Object.hasOwn(shop, 'tagVoiceMultiplier')) {
+        shop.tagVoiceMultiplier = 1.5;
         dirty = true;
       }
       if (!Array.isArray(shop.reportTypes)) {

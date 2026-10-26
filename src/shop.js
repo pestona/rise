@@ -79,8 +79,16 @@ function addBalance(guildId, userId, delta) {
   return setBalance(guildId, userId, getBalance(guildId, userId) + delta);
 }
 
-function listBalances(guildId) {
-  creditVoicePoints(guildId);
+function hasServerTag(client, guildId, userId) {
+  if (!client) return false;
+  const guild = client.guilds.cache.get(guildId);
+  const user = guild?.members.cache.get(userId)?.user || client.users.cache.get(userId);
+  const primary = user?.primaryGuild;
+  return Boolean(primary?.identityEnabled && primary.identityGuildId === guildId);
+}
+
+function listBalances(guildId, client) {
+  creditVoicePoints(guildId, client);
   return Object.entries(guildData(guildId).balances)
     .map(([userId, value]) => ({
       userId,
@@ -100,6 +108,42 @@ function shopItems(guildId) {
 
 function findItem(guildId, itemId) {
   return shopItems(guildId).find((item) => item.id === itemId) || null;
+}
+
+function itemStock(item) {
+  if (item?.stock == null || item.stock === '') return null;
+  const value = Math.floor(Number(item.stock));
+  return Number.isInteger(value) ? Math.max(0, value) : null;
+}
+
+function isItemEnabled(item) {
+  return Boolean(item) && item.enabled !== false;
+}
+
+function isItemAvailable(item) {
+  if (!isItemEnabled(item)) return false;
+  const stock = itemStock(item);
+  return stock === null || stock > 0;
+}
+
+function takeStock(guildId, itemId) {
+  let ok = false;
+  store.updateGuild(guildId, (guild) => {
+    const item = (guild.shop?.items || []).find((entry) => entry.id === itemId);
+    if (!isItemAvailable(item)) return;
+    const stock = itemStock(item);
+    if (stock !== null) item.stock = stock - 1;
+    ok = true;
+  });
+  return ok;
+}
+
+function returnStock(guildId, itemId) {
+  store.updateGuild(guildId, (guild) => {
+    const item = (guild.shop?.items || []).find((entry) => entry.id === itemId);
+    if (!item || itemStock(item) === null) return;
+    item.stock = itemStock(item) + 1;
+  });
 }
 
 function reportTypes(guildId) {
@@ -127,18 +171,21 @@ function reportModal(type) {
     );
 }
 
-function creditVoicePoints(guildId) {
+function creditVoicePoints(guildId, client) {
   const minutesPerPoint = Number(shopSettings(guildId).voiceMinutesPerPoint || 0);
   if (!minutesPerPoint || minutesPerPoint <= 0) return;
   const needMs = minutesPerPoint * 60_000;
+  const tagMultiplier = Number(shopSettings(guildId).tagVoiceMultiplier || 1);
   const data = guildData(guildId);
   let dirty = false;
   for (const userId of listVoiceUserIds(guildId)) {
     const total = getUserVoiceMs(guildId, userId);
     const credited = Number(data.creditedVoiceMs[userId] || 0);
-    const gained = Math.floor((total - credited) / needMs);
+    const factor = hasServerTag(client, guildId, userId) && tagMultiplier > 1 ? tagMultiplier : 1;
+    const unitMs = needMs / factor;
+    const gained = Math.floor((total - credited) / unitMs);
     if (gained <= 0) continue;
-    data.creditedVoiceMs[userId] = credited + gained * needMs;
+    data.creditedVoiceMs[userId] = credited + gained * unitMs;
     data.balances[userId] = getBalance(guildId, userId) + gained;
     dirty = true;
   }
@@ -225,8 +272,16 @@ async function handleShopSelect(interaction) {
   }
   guildData(interaction.guildId).selectedItemId[interaction.user.id] = item.id;
   saveSoon();
+  const stock = itemStock(item);
+  const extra = !isItemEnabled(item)
+    ? 'Сейчас выключен.'
+    : stock === 0
+      ? 'Нет в наличии.'
+      : stock === null
+        ? 'Без лимита. Нажми **Купить**.'
+        : `Осталось **${stock}**. Нажми **Купить**.`;
   return interaction.reply({
-    content: `Выбран товар **${item.name}** · **${item.price}** баллов. Нажми **Купить**.`,
+    content: `Выбран товар **${item.name}** · **${item.price}** баллов. ${extra}`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -234,7 +289,7 @@ async function handleShopSelect(interaction) {
 async function handleShopButton(interaction) {
   const action = interaction.customId.split(':')[1];
   const settings = store.getGuild(interaction.guildId);
-  creditVoicePoints(interaction.guildId);
+  creditVoicePoints(interaction.guildId, interaction.client);
 
   if (action === 'balance') {
     return interaction.reply({
@@ -282,6 +337,13 @@ async function handleShopButton(interaction) {
         flags: MessageFlags.Ephemeral,
       });
     }
+    if (!isItemEnabled(item)) {
+      return interaction.reply({ content: 'Этот товар выключен.', flags: MessageFlags.Ephemeral });
+    }
+    const stock = itemStock(item);
+    if (stock === 0) {
+      return interaction.reply({ content: 'Этого товара больше нет.', flags: MessageFlags.Ephemeral });
+    }
     const balance = getBalance(interaction.guildId, interaction.user.id);
     if (balance < item.price) {
       return interaction.reply({
@@ -304,6 +366,10 @@ async function handleShopButton(interaction) {
       return interaction.reply({ content: 'Канал заявок на покупку недоступен.', flags: MessageFlags.Ephemeral });
     }
 
+    if (!takeStock(interaction.guildId, item.id)) {
+      return interaction.reply({ content: 'Этого товара больше нет.', flags: MessageFlags.Ephemeral });
+    }
+    await refreshShopPanels(interaction.client, interaction.guildId);
     const next = addBalance(interaction.guildId, interaction.user.id, -item.price);
     const purchase = {
       id: shortId(),
@@ -452,8 +518,11 @@ async function handleShopPurchaseReview(interaction) {
   purchase.status = accepted ? 'accepted' : 'rejected';
   purchase.reviewedAt = Date.now();
   purchase.reviewerId = interaction.user.id;
-  if (!accepted) addBalance(interaction.guildId, purchase.userId, purchase.price);
-  else saveSoon();
+  if (!accepted) {
+    addBalance(interaction.guildId, purchase.userId, purchase.price);
+    returnStock(interaction.guildId, purchase.itemId);
+    await refreshShopPanels(interaction.client, interaction.guildId);
+  } else saveSoon();
 
   await interaction.update({
     components: [buildShopPurchaseReview(purchase, settings, { reviewed: true })],
@@ -469,7 +538,7 @@ async function handleShopPurchaseReview(interaction) {
 function setupShop(client) {
   client.once(Events.ClientReady, () => {
     const timer = setInterval(() => {
-      for (const guildId of store.getGuildIds()) creditVoicePoints(guildId);
+      for (const guildId of store.getGuildIds()) creditVoicePoints(guildId, client);
     }, 60_000);
     timer.unref?.();
   });

@@ -210,7 +210,7 @@ function adminPayload(interaction, page) {
   else if (page === 'shop' || page.startsWith('shop:')) {
     const parts = page.split(':');
     container = buildShopTab(guild, parts[1] || 'home', {
-      balances: listBalances(interaction.guildId),
+      balances: listBalances(interaction.guildId, interaction.client),
       page: Number(parts[2] || 0) || 0,
     });
   }
@@ -721,6 +721,15 @@ function shopRateModal(shop) {
           .setMaxLength(6)
           .setValue(String(shop.voiceMinutesPerPoint ?? 60)),
       ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tag')
+          .setLabel('Множитель за тег сервера')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(6)
+          .setValue(String(shop.tagVoiceMultiplier ?? 1.5)),
+      ),
     );
 }
 
@@ -759,36 +768,53 @@ function shopReportTypeModal(type) {
     );
 }
 
-function shopItemModal() {
+function parseShopStock(text) {
+  const raw = String(text || '').trim();
+  if (!raw || raw === '-' || raw === '∞') return { ok: true, value: null };
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 100000) return { ok: false };
+  return { ok: true, value };
+}
+
+function shopItemModal(item) {
+  const nameInput = new TextInputBuilder()
+    .setCustomId('name')
+    .setLabel('Название')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(80);
+  if (item?.name) nameInput.setValue(truncate(item.name, 80));
+  const descriptionInput = new TextInputBuilder()
+    .setCustomId('description')
+    .setLabel('Описание')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(100);
+  if (item?.description) descriptionInput.setValue(truncate(item.description, 100));
+  const priceInput = new TextInputBuilder()
+    .setCustomId('price')
+    .setLabel('Цена в баллах')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(6)
+    .setPlaceholder('150');
+  if (item && item.price != null) priceInput.setValue(String(item.price));
+  const stockInput = new TextInputBuilder()
+    .setCustomId('stock')
+    .setLabel('Остаток (пусто = без лимита)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(6)
+    .setPlaceholder('10');
+  if (item && item.stock != null && item.stock !== '') stockInput.setValue(String(item.stock));
   return new ModalBuilder()
-    .setCustomId('admin:shopadd:modal')
-    .setTitle('Новый товар')
+    .setCustomId(item ? `admin:shopedit:${item.id}` : 'admin:shopadd:modal')
+    .setTitle(item ? 'Изменить товар' : 'Новый товар')
     .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('name')
-          .setLabel('Название')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(80),
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('description')
-          .setLabel('Описание')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(false)
-          .setMaxLength(100),
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('price')
-          .setLabel('Цена в баллах')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(6)
-          .setPlaceholder('150'),
-      ),
+      new ActionRowBuilder().addComponents(nameInput),
+      new ActionRowBuilder().addComponents(descriptionInput),
+      new ActionRowBuilder().addComponents(priceInput),
+      new ActionRowBuilder().addComponents(stockInput),
     );
 }
 
@@ -1446,6 +1472,29 @@ async function handleAdminButton(interaction) {
       return interaction.reply({ content: 'Максимум 25 товаров.', flags: MessageFlags.Ephemeral });
     }
     return interaction.showModal(shopItemModal());
+  }
+  if (action === 'shopedit') {
+    const settings = store.getGuild(interaction.guildId);
+    const items = settings.shop?.items || [];
+    const selected = items.find((item) => item.id === settings.shop?.selectedItemId) || items[0];
+    if (!selected) {
+      return interaction.reply({ content: 'Сначала выбери товар.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(shopItemModal(selected));
+  }
+  if (action === 'shoptoggle') {
+    const settings = store.getGuild(interaction.guildId);
+    const items = settings.shop?.items || [];
+    const selected = items.find((item) => item.id === settings.shop?.selectedItemId) || items[0];
+    if (!selected) {
+      return interaction.reply({ content: 'Сначала выбери товар.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.shop?.items || []).find((entry) => entry.id === selected.id);
+      if (item) item.enabled = item.enabled === false;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:items');
   }
   if (action === 'shopdel') {
     const settings = store.getGuild(interaction.guildId);
@@ -2271,12 +2320,17 @@ async function handleAdminModal(interaction) {
 
   if (action === 'shoprate') {
     const voice = Number(String(interaction.fields.getTextInputValue('voice').trim()).replace(',', '.'));
+    const tag = Number(String(interaction.fields.getTextInputValue('tag').trim()).replace(',', '.'));
     if (!Number.isFinite(voice) || voice < 0 || voice > 10080) {
       return interaction.reply({ content: 'Минуты войса: число от 0 до 10080.', flags: MessageFlags.Ephemeral });
+    }
+    if (!Number.isFinite(tag) || tag < 1 || tag > 10) {
+      return interaction.reply({ content: 'Множитель за тег: число от 1 до 10. 1 = без бонуса.', flags: MessageFlags.Ephemeral });
     }
     store.updateGuild(interaction.guildId, (guild) => {
       if (!guild.shop) guild.shop = {};
       guild.shop.voiceMinutesPerPoint = voice;
+      guild.shop.tagVoiceMultiplier = tag;
     });
     await refreshShopPanels(interaction.client, interaction.guildId);
     return showAdmin(interaction, 'shop:rates');
@@ -2336,11 +2390,15 @@ async function handleAdminModal(interaction) {
     const name = interaction.fields.getTextInputValue('name').trim();
     const description = interaction.fields.getTextInputValue('description').trim();
     const price = Number(interaction.fields.getTextInputValue('price').trim());
+    const stock = parseShopStock(interaction.fields.getTextInputValue('stock'));
     if (!name) {
       return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
     }
     if (!Number.isInteger(price) || price < 1 || price > 1000000) {
       return interaction.reply({ content: 'Цена: целое число от 1 до 1000000.', flags: MessageFlags.Ephemeral });
+    }
+    if (!stock.ok) {
+      return interaction.reply({ content: 'Остаток: пусто = без лимита, либо целое число от 0 до 100000.', flags: MessageFlags.Ephemeral });
     }
     if ((store.getGuild(interaction.guildId).shop?.items || []).length >= 25) {
       return interaction.reply({ content: 'Максимум 25 товаров.', flags: MessageFlags.Ephemeral });
@@ -2349,8 +2407,39 @@ async function handleAdminModal(interaction) {
     store.updateGuild(interaction.guildId, (guild) => {
       if (!guild.shop) guild.shop = {};
       if (!Array.isArray(guild.shop.items)) guild.shop.items = [];
-      guild.shop.items.push({ id, name, description, price, roleId: null });
+      guild.shop.items.push({ id, name, description, price, stock: stock.value, enabled: true, roleId: null });
       guild.shop.selectedItemId = id;
+    });
+    await refreshShopPanels(interaction.client, interaction.guildId);
+    return showAdmin(interaction, 'shop:items');
+  }
+
+  if (action === 'shopedit') {
+    const itemId = parts[2];
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const description = interaction.fields.getTextInputValue('description').trim();
+    const price = Number(interaction.fields.getTextInputValue('price').trim());
+    const stock = parseShopStock(interaction.fields.getTextInputValue('stock'));
+    if (!name) {
+      return interaction.reply({ content: 'Название не может быть пустым.', flags: MessageFlags.Ephemeral });
+    }
+    if (!Number.isInteger(price) || price < 1 || price > 1000000) {
+      return interaction.reply({ content: 'Цена: целое число от 1 до 1000000.', flags: MessageFlags.Ephemeral });
+    }
+    if (!stock.ok) {
+      return interaction.reply({ content: 'Остаток: пусто = без лимита, либо целое число от 0 до 100000.', flags: MessageFlags.Ephemeral });
+    }
+    const items = store.getGuild(interaction.guildId).shop?.items || [];
+    if (!items.some((item) => item.id === itemId)) {
+      return interaction.reply({ content: 'Этот товар уже недоступен.', flags: MessageFlags.Ephemeral });
+    }
+    store.updateGuild(interaction.guildId, (guild) => {
+      const item = (guild.shop?.items || []).find((entry) => entry.id === itemId);
+      if (!item) return;
+      item.name = name;
+      item.description = description;
+      item.price = price;
+      item.stock = stock.value;
     });
     await refreshShopPanels(interaction.client, interaction.guildId);
     return showAdmin(interaction, 'shop:items');

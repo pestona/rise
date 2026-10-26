@@ -1931,9 +1931,16 @@ function shopReportTypes(shop) {
   return [...(shop?.reportTypes || [])].slice(0, 25);
 }
 
+function shopStockLabel(item) {
+  if (item?.stock == null || item.stock === '') return 'без лимита';
+  const stock = Math.max(0, Math.floor(Number(item.stock) || 0));
+  return stock ? `осталось ${stock}` : 'нет в наличии';
+}
+
 function buildShopPanel(guild) {
   const shop = guild.shop || {};
   const items = (shop.items || []).slice(0, 25);
+  const buyable = items.some((item) => item.enabled !== false && (item.stock == null || Number(item.stock) > 0));
   const container = new ContainerBuilder().setAccentColor(0xf1c40f);
   addBanner(container, shop.bannerUrl);
   if (items.length) {
@@ -1945,8 +1952,13 @@ function buildShopPanel(guild) {
           .addOptions(
             items.map((item) =>
               new StringSelectMenuOptionBuilder()
-                .setLabel(truncate(item.name || 'Товар', 100))
-                .setDescription(truncate(`${item.price} баллов${item.description ? ` · ${item.description}` : ''}`, 100))
+                .setLabel(truncate(`${item.enabled === false ? '[выкл] ' : ''}${item.name || 'Товар'}`, 100))
+                .setDescription(
+                  truncate(
+                    `${item.price} баллов · ${shopStockLabel(item)}${item.description ? ` · ${item.description}` : ''}`,
+                    100,
+                  ),
+                )
                 .setValue(item.id),
             ),
           ),
@@ -1961,7 +1973,7 @@ function buildShopPanel(guild) {
         .setCustomId('shop:buy')
         .setLabel('Купить')
         .setStyle(ButtonStyle.Success)
-        .setDisabled(!items.length),
+        .setDisabled(!buyable),
     ),
   );
   return container;
@@ -1979,7 +1991,12 @@ function buildShopBalance(guild, balance) {
     text.setContent(
       `## Баланс\n` +
         `У тебя **${balance}** баллов.\n\n` +
-        (voice > 0 ? `Голосовые: 1 балл за **${voice}** мин. в войсе.\n\n` : 'Голосовые баллы выключены.\n\n') +
+        (voice > 0
+          ? `Голосовые: 1 балл за **${voice}** мин. в войсе.` +
+            (Number(shop.tagVoiceMultiplier || 1) > 1
+              ? ` С тегом сервера: **x${shop.tagVoiceMultiplier}**.\n\n`
+              : '\n\n')
+          : 'Голосовые баллы выключены.\n\n') +
         `**РП-отчёты**\n${truncate(list, 1500)}`,
     ),
   );
@@ -2121,7 +2138,7 @@ function shopItemList(items, selected) {
   return items
     .map(
       (item) =>
-        `${item.id === selected?.id ? '•' : '·'} **${item.name}** — **${item.price}** б.` +
+        `${item.id === selected?.id ? '•' : '·'} **${item.name}** — **${item.price}** б. · ${shopStockLabel(item)} · ${item.enabled === false ? 'выкл' : 'вкл'}` +
         `${item.roleId ? ` · ${roleMention(item.roleId)}` : ''}`,
     )
     .join('\n');
@@ -2134,7 +2151,9 @@ function buildShopHome(shop, items) {
     .addTextDisplayComponents((text) =>
       text.setContent(
         `Фото панели: **${shop.bannerUrl ? 'стоит' : 'нет'}**\n` +
-          `Начисление: **${shopReportTypes(shop).length}** типов РП · **${shop.voiceMinutesPerPoint ?? 60} мин.** = 1 балл\n` +
+          `Начисление: **${shopReportTypes(shop).length}** типов РП · **${shop.voiceMinutesPerPoint ?? 60} мин.** = 1 балл` +
+          (Number(shop.tagVoiceMultiplier || 1) > 1 ? ` · тег **x${shop.tagVoiceMultiplier}**` : '') +
+          `\n` +
           `Товары: **${items.length}**\n` +
           `Проверка отчётов: ${channelMention(shop.reviewChannelId)}\n` +
           `Заявки на покупку: ${channelMention(shop.purchaseChannelId || shop.reviewChannelId)}`,
@@ -2228,6 +2247,7 @@ function buildShopRates(shop) {
       text.setContent(
         `## Магазин · Начисление\n` +
           `Голосовые: ${voice > 0 ? `**1 балл = ${voice} мин.**` : '**выкл.**'}\n` +
+          `Тег сервера: **x${shop.tagVoiceMultiplier ?? 1.5}**\n` +
           `Канал проверки: ${channelMention(shop.reviewChannelId)}\n\n` +
           `**РП-мероприятия**\n${truncate(list, 1500)}`,
       ),
@@ -2302,6 +2322,16 @@ function buildShopItems(shop, items, selected) {
           .setStyle(ButtonStyle.Success)
           .setDisabled(items.length >= 25),
         new ButtonBuilder()
+          .setCustomId('admin:shopedit')
+          .setLabel('Изменить')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
+          .setCustomId('admin:shoptoggle')
+          .setLabel(selected?.enabled === false ? 'Включить' : 'Выключить')
+          .setStyle(selected?.enabled === false ? ButtonStyle.Success : ButtonStyle.Secondary)
+          .setDisabled(!selected),
+        new ButtonBuilder()
           .setCustomId('admin:shopdel')
           .setLabel('Товар −')
           .setStyle(ButtonStyle.Danger)
@@ -2322,7 +2352,7 @@ function buildShopItems(shop, items, selected) {
               items.slice(0, 25).map((item) =>
                 new StringSelectMenuOptionBuilder()
                   .setLabel(truncate(item.name, 100))
-                  .setDescription(truncate(`${item.price} баллов`, 100))
+                  .setDescription(truncate(`${item.price} баллов · ${item.enabled === false ? 'выкл' : shopStockLabel(item)}`, 100))
                   .setValue(item.id)
                   .setDefault(item.id === selected?.id),
               ),
