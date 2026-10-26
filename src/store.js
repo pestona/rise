@@ -137,6 +137,7 @@ function defaultGuild() {
         gatheringModerate: [],
         positionModerate: [],
         panelsPublish: [],
+        shopManage: [],
         settingsManage: [],
       },
     },

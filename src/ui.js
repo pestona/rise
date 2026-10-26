@@ -1340,7 +1340,8 @@ function buildAccessTab(guild) {
     .addTextDisplayComponents((text) =>
       text.setContent(
         `## Доступ по ролям\n` +
-          `Администраторы сервера всегда имеют полный доступ.\n\n${summary}`,
+          `Администраторы сервера всегда имеют полный доступ.\n` +
+          `Для каждого действия можно выбрать несколько ролей.\n\n${summary}`,
       ),
     )
     .addTextDisplayComponents((text) => text.setContent('**Какое действие настроить**'))
@@ -1366,7 +1367,7 @@ function buildAccessTab(guild) {
       row.setComponents(
         new RoleSelectMenuBuilder()
           .setCustomId('admin:accessroles')
-          .setPlaceholder('Выберите разрешённые роли')
+          .setPlaceholder('Можно выбрать несколько ролей')
           .setMinValues(0)
           .setMaxValues(25),
       ),
@@ -2389,7 +2390,7 @@ function buildShopItems(shop, items, selected) {
   return container;
 }
 
-function buildShopPoints(balances = [], page = 0) {
+function buildShopPoints(balances = [], page = 0, confirmReset = false) {
   const pageSize = 15;
   const totalPages = Math.max(1, Math.ceil(balances.length / pageSize));
   const current = Math.min(Math.max(0, page), totalPages - 1);
@@ -2405,7 +2406,10 @@ function buildShopPoints(balances = [], page = 0) {
         `## Магазин · Баллы\n` +
           `Всего с балансом: **${balances.length}**` +
           (totalPages > 1 ? ` · стр. **${current + 1}/${totalPages}**` : '') +
-          `\n\n${truncate(list, 1800)}\n\nВыбери человека — откроется окно, сколько начислить или списать.`,
+          `\n\n${truncate(list, 1800)}\n\n` +
+          (confirmReset
+            ? '**Обнулить все баллы?** Это сотрёт балансы у всех. Начисленный войс не вернётся сразу — дальше считается заново.'
+            : 'Выбери человека — откроется окно, сколько начислить или списать.'),
       ),
     )
     .addTextDisplayComponents((text) => text.setContent('**Выдать баллы**'))
@@ -2429,7 +2433,20 @@ function buildShopPoints(balances = [], page = 0) {
       ),
     )
     .addActionRowComponents((row) => {
-      const buttons = [backToShopButton()];
+      if (confirmReset) {
+        return row.setComponents(
+          new ButtonBuilder().setCustomId('admin:shopresetok').setLabel('Да, обнулить').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('admin:tab:shop:points').setLabel('Отмена').setStyle(ButtonStyle.Secondary),
+        );
+      }
+      const buttons = [
+        new ButtonBuilder()
+          .setCustomId('admin:shopreset')
+          .setLabel('Обнулить все')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!balances.length),
+        backToShopButton(),
+      ];
       if (totalPages > 1) {
         buttons.unshift(
           new ButtonBuilder()
@@ -2456,7 +2473,7 @@ function buildShopTab(guild, section = 'home', extra = {}) {
   if (section === 'photo') return buildShopPhoto(shop);
   if (section === 'rates') return buildShopRates(shop);
   if (section === 'items') return buildShopItems(shop, items, selected);
-  if (section === 'points') return buildShopPoints(extra.balances || [], extra.page || 0);
+  if (section === 'points') return buildShopPoints(extra.balances || [], extra.page || 0, extra.confirmReset);
   return buildShopHome(shop, items);
 }
 

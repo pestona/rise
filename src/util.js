@@ -9,6 +9,7 @@ const ACCESS_ACTIONS = {
   gatheringModerate: 'Модерация сборов',
   positionModerate: 'Модерация пика позиций',
   panelsPublish: 'Публикация панелей',
+  shopManage: 'Управление магазином',
   settingsManage: 'Полная настройка /panel',
 };
 

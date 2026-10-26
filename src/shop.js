@@ -98,6 +98,18 @@ function listBalances(guildId, client) {
     .sort((a, b) => b.balance - a.balance || a.userId.localeCompare(b.userId));
 }
 
+function resetBalances(guildId, client) {
+  const data = guildData(guildId);
+  const count = Object.values(data.balances).filter((value) => Math.floor(Number(value) || 0) > 0).length;
+  data.balances = {};
+  data.creditedVoiceMs = {};
+  for (const userId of listVoiceUserIds(guildId)) {
+    data.creditedVoiceMs[userId] = getUserVoiceMs(guildId, userId);
+  }
+  saveSoon();
+  return count;
+}
+
 function shopSettings(guildId) {
   return store.getGuild(guildId).shop || {};
 }
@@ -548,6 +560,7 @@ module.exports = {
   getBalance,
   addBalance,
   listBalances,
+  resetBalances,
   shopItems,
   findItem,
   publishShopPanel,

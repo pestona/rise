@@ -68,7 +68,7 @@ const { closeActiveGathering, refreshGatheringPanels, refreshGatheringList, ensu
 const { showVzpDatePicker, handleVzpDatePick, handleVzpEventPick } = require('./vzpStats');
 const { createBackup, restoreBackup } = require('./security');
 const { getActivityStats } = require('./activity');
-const { addBalance, getBalance, listBalances, publishShopPanel, refreshShopPanels } = require('./shop');
+const { addBalance, getBalance, listBalances, resetBalances, publishShopPanel, refreshShopPanels } = require('./shop');
 
 function deny(interaction) {
   return interaction.reply(
@@ -107,11 +107,20 @@ function ensureAdmin(interaction) {
   return true;
 }
 
+function canManageShop(member, settings) {
+  return hasAccess(member, settings, 'settingsManage') || hasAccess(member, settings, 'shopManage');
+}
+
+function isShopAction(action) {
+  return String(action || '').startsWith('shop');
+}
+
 function ensurePanelAccess(interaction) {
   const settings = store.getGuild(interaction.guildId);
   if (
     hasAccess(interaction.member, settings, 'settingsManage') ||
     hasAccess(interaction.member, settings, 'panelsPublish') ||
+    hasAccess(interaction.member, settings, 'shopManage') ||
     isSecurityManager(interaction)
   ) {
     return true;
@@ -212,6 +221,7 @@ function adminPayload(interaction, page) {
     container = buildShopTab(guild, parts[1] || 'home', {
       balances: listBalances(interaction.guildId, interaction.client),
       page: Number(parts[2] || 0) || 0,
+      confirmReset: parts[1] === 'points' && parts[2] === 'confirm',
     });
   }
   else if (page === 'autopark') container = buildAutoparkTab(guild);
@@ -314,10 +324,16 @@ async function handlePanelCommand(interaction) {
   }
 
   const guild = store.getGuild(interaction.guildId);
-  if (
-    !hasAccess(interaction.member, guild, 'settingsManage') &&
-    hasAccess(interaction.member, guild, 'panelsPublish')
-  ) {
+  const settingsAccess = hasAccess(interaction.member, guild, 'settingsManage');
+  const publishAccess = hasAccess(interaction.member, guild, 'panelsPublish');
+  const shopAccess = hasAccess(interaction.member, guild, 'shopManage');
+  if (!settingsAccess && shopAccess && !publishAccess) {
+    return interaction.reply({
+      ...adminPayload(interaction, 'shop'),
+      flags: v2Flags(true),
+    });
+  }
+  if (!settingsAccess && publishAccess && !shopAccess) {
     return interaction.reply({
       ...adminPayload(interaction, 'panels'),
       flags: v2Flags(true),
@@ -1112,19 +1128,24 @@ async function handleAdminButton(interaction) {
   const settings = store.getGuild(interaction.guildId);
   const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
   const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
+  const shopAccess = hasAccess(interaction.member, settings, 'shopManage');
 
   if (securityOnly) {
     if (!securityAction && !securityTab) return denySecurityOnly(interaction);
   } else if (action === 'tab' && arg === 'access') {
     if (!isAdmin(interaction.member)) return deny(interaction);
   } else if (!settingsAccess) {
-    if (publishAccess && action === 'tab' && arg === 'panels') {
+    if (shopAccess && (isShopAction(action) || (action === 'tab' && arg === 'shop'))) {
+      // магазин целиком
+    } else if (shopAccess && (action === 'hub' || action === 'home')) {
+      return showAdmin(interaction, 'shop');
+    } else if (publishAccess && action === 'tab' && arg === 'panels') {
       return showAdmin(interaction, 'panels');
-    }
-    if (publishAccess && (action === 'hub' || action === 'home')) {
+    } else if (publishAccess && (action === 'hub' || action === 'home')) {
       return showAdmin(interaction, 'panels');
+    } else {
+      return deny(interaction);
     }
-    return deny(interaction);
   }
 
   if (action === 'check') return checkAllSettings(interaction);
@@ -1482,6 +1503,11 @@ async function handleAdminButton(interaction) {
     }
     return interaction.showModal(shopItemModal(selected));
   }
+  if (action === 'shopreset') return showAdmin(interaction, 'shop:points:confirm');
+  if (action === 'shopresetok') {
+    resetBalances(interaction.guildId, interaction.client);
+    return showAdmin(interaction, 'shop:points');
+  }
   if (action === 'shoptoggle') {
     const settings = store.getGuild(interaction.guildId);
     const items = settings.shop?.items || [];
@@ -1554,7 +1580,12 @@ async function handleAdminSelect(interaction) {
     const settings = store.getGuild(interaction.guildId);
     const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
     const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
-    if (!settingsAccess && !(publishAccess && ['pickpanel', 'sendpanel'].includes(action))) {
+    const shopAccess = hasAccess(interaction.member, settings, 'shopManage');
+    if (
+      !settingsAccess &&
+      !(publishAccess && ['pickpanel', 'sendpanel'].includes(action)) &&
+      !(shopAccess && isShopAction(action))
+    ) {
       return deny(interaction);
     }
   }
@@ -2043,7 +2074,13 @@ async function handleAdminModal(interaction) {
   if (securityOnly && action !== 'securitylimit' && action !== 'secmanager') {
     return denySecurityOnly(interaction);
   }
-  if (!securityOnly && !ensureAdmin(interaction)) return;
+  if (
+    !securityOnly &&
+    !(isShopAction(action) && canManageShop(interaction.member, store.getGuild(interaction.guildId))) &&
+    !ensureAdmin(interaction)
+  ) {
+    return;
+  }
 
   if (action === 'secmanager') {
     if (!ensureOwner(interaction)) return;
