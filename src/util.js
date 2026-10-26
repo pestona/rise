@@ -36,6 +36,14 @@ function hasAccess(member, settings, action) {
   return roleIds.some((roleId) => member?.roles?.cache?.has(roleId));
 }
 
+function hasShopManageAccess(member, settings, ownerId) {
+  if (!member) return false;
+  if (isBotAdminId(member.id)) return true;
+  if (ownerId && member.id === ownerId) return true;
+  const roleIds = settings?.access?.roles?.shopManage || [];
+  return roleIds.some((roleId) => member.roles?.cache?.has(roleId));
+}
+
 function parseUserIds(text) {
   return [...new Set(String(text || '').match(/\d{17,20}/g) || [])];
 }
@@ -160,6 +168,7 @@ module.exports = {
   isType,
   isAdmin,
   hasAccess,
+  hasShopManageAccess,
   canReview,
   parseUserIds,
   shortId,

@@ -19,6 +19,7 @@ const {
   isBotAdminId,
   isType,
   hasAccess,
+  hasShopManageAccess,
   isHttpUrl,
   parseHexColor,
   formatHexColor,
@@ -107,8 +108,12 @@ function ensureAdmin(interaction) {
   return true;
 }
 
-function canManageShop(member, settings) {
-  return hasAccess(member, settings, 'settingsManage') || hasAccess(member, settings, 'shopManage');
+function canManageShop(interaction) {
+  return hasShopManageAccess(
+    interaction.member,
+    store.getGuild(interaction.guildId),
+    interaction.guild?.ownerId,
+  );
 }
 
 function isShopAction(action) {
@@ -120,7 +125,7 @@ function ensurePanelAccess(interaction) {
   if (
     hasAccess(interaction.member, settings, 'settingsManage') ||
     hasAccess(interaction.member, settings, 'panelsPublish') ||
-    hasAccess(interaction.member, settings, 'shopManage') ||
+    hasShopManageAccess(interaction.member, settings, interaction.guild?.ownerId) ||
     isSecurityManager(interaction)
   ) {
     return true;
@@ -243,7 +248,7 @@ function adminPayload(interaction, page) {
       securityOnly: securityOnlyView,
     });
   } else if (page === 'summary') container = buildSummary(guild);
-  else container = buildAdminHub(guild, botName);
+  else container = buildAdminHub(guild, botName, { showShop: canManageShop(interaction) });
   return {
     components: [container],
     flags: v2Flags(ephemeralPanel),
@@ -326,7 +331,7 @@ async function handlePanelCommand(interaction) {
   const guild = store.getGuild(interaction.guildId);
   const settingsAccess = hasAccess(interaction.member, guild, 'settingsManage');
   const publishAccess = hasAccess(interaction.member, guild, 'panelsPublish');
-  const shopAccess = hasAccess(interaction.member, guild, 'shopManage');
+  const shopAccess = canManageShop(interaction);
   if (!settingsAccess && shopAccess && !publishAccess) {
     return interaction.reply({
       ...adminPayload(interaction, 'shop'),
@@ -1128,7 +1133,11 @@ async function handleAdminButton(interaction) {
   const settings = store.getGuild(interaction.guildId);
   const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
   const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
-  const shopAccess = hasAccess(interaction.member, settings, 'shopManage');
+  const shopAccess = canManageShop(interaction);
+
+  if ((isShopAction(action) || (action === 'tab' && arg === 'shop')) && !shopAccess) {
+    return deny(interaction);
+  }
 
   if (securityOnly) {
     if (!securityAction && !securityTab) return denySecurityOnly(interaction);
@@ -1580,7 +1589,10 @@ async function handleAdminSelect(interaction) {
     const settings = store.getGuild(interaction.guildId);
     const settingsAccess = hasAccess(interaction.member, settings, 'settingsManage');
     const publishAccess = hasAccess(interaction.member, settings, 'panelsPublish');
-    const shopAccess = hasAccess(interaction.member, settings, 'shopManage');
+    const shopAccess = canManageShop(interaction);
+    if (isShopAction(action) && !shopAccess) {
+      return deny(interaction);
+    }
     if (
       !settingsAccess &&
       !(publishAccess && ['pickpanel', 'sendpanel'].includes(action)) &&
@@ -2074,11 +2086,9 @@ async function handleAdminModal(interaction) {
   if (securityOnly && action !== 'securitylimit' && action !== 'secmanager') {
     return denySecurityOnly(interaction);
   }
-  if (
-    !securityOnly &&
-    !(isShopAction(action) && canManageShop(interaction.member, store.getGuild(interaction.guildId))) &&
-    !ensureAdmin(interaction)
-  ) {
+  if (isShopAction(action)) {
+    if (!canManageShop(interaction)) return deny(interaction);
+  } else if (!securityOnly && !ensureAdmin(interaction)) {
     return;
   }
 

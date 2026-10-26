@@ -190,7 +190,7 @@ const PUBLIC_PANELS = [
   },
 ];
 
-function buildAdminHub(guild, botName) {
+function buildAdminHub(guild, botName, extra = {}) {
   const name = botName || 'RISE';
   const panelReady = Boolean(guild.panel?.channelId);
   const ticketReady = Boolean(
@@ -298,7 +298,8 @@ function buildAdminHub(guild, botName) {
           .setCustomId('admin:tab:shop')
           .setLabel('Магазин')
           .setEmoji('🛒')
-          .setStyle(ButtonStyle.Primary),
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(extra.showShop === false),
       ),
     );
 
@@ -1340,7 +1341,8 @@ function buildAccessTab(guild) {
     .addTextDisplayComponents((text) =>
       text.setContent(
         `## Доступ по ролям\n` +
-          `Администраторы сервера всегда имеют полный доступ.\n` +
+          `Администраторы сервера всегда имеют полный доступ, кроме магазина.\n` +
+          `Магазин: только владелец сервера и роли, которые ты впишешь.\n` +
           `Для каждого действия можно выбрать несколько ролей.\n\n${summary}`,
       ),
     )
