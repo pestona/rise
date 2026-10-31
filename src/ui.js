@@ -20,9 +20,9 @@ function v2Flags(ephemeral = false) {
 }
 
 function addBanner(container, url) {
-  if (!url) return container;
+  if (!isHttpUrl(url)) return container;
   return container.addMediaGalleryComponents((gallery) =>
-    gallery.addItems((item) => item.setURL(url).setDescription('Баннер заявок')),
+    gallery.addItems((item) => item.setURL(url).setDescription('Баннер')),
   );
 }
 
@@ -1930,6 +1930,15 @@ function buildNicksTab(guild, options = {}) {
   return container;
 }
 
+function safeEmoji(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const custom = raw.match(/^<?a?:([a-zA-Z0-9_]+):(\d+)>?$/);
+  if (custom) return { id: custom[2], name: custom[1] };
+  if (/[a-zA-Z0-9:/<>]/.test(raw) || raw.length > 16) return null;
+  return raw;
+}
+
 function shopReportTypes(shop) {
   return [...(shop?.reportTypes || [])].slice(0, 25);
 }
@@ -2006,7 +2015,7 @@ function buildShopBalance(guild, balance) {
   return container;
 }
 
-function buildShopReportCatalog(guild) {
+function buildShopReportCatalog(guild, extra = {}) {
   const types = shopReportTypes(guild.shop);
   const list = types.length
     ? types.map((type) => `${type.emoji || '•'} **${type.name}** — +${type.points} балл${type.points === 1 ? '' : type.points < 5 ? 'а' : 'ов'}`).join('\n')
@@ -2018,18 +2027,23 @@ function buildShopReportCatalog(guild) {
         (types.length ? 'Выберите тип мероприятия ниже, затем укажите ссылку на скриншот.' : ''),
     ),
   );
-  for (let i = 0; i < types.length; i += 3) {
-    const chunk = types.slice(i, i + 3);
+  if (types.length) {
     container.addActionRowComponents((row) =>
       row.setComponents(
-        chunk.map((type) => {
-          const button = new ButtonBuilder()
-            .setCustomId(`shop:rtype:${type.id}`)
-            .setLabel(truncate(type.name, 80))
-            .setStyle(ButtonStyle.Secondary);
-          if (type.emoji) button.setEmoji(type.emoji);
-          return button;
-        }),
+        new StringSelectMenuBuilder()
+          .setCustomId('shop:rtypes')
+          .setPlaceholder('Выберите тип мероприятия')
+          .addOptions(
+            types.map((type) => {
+              const option = new StringSelectMenuOptionBuilder()
+                .setLabel(truncate(type.name || 'РП', 100))
+                .setDescription(truncate(`+${type.points} баллов`, 100))
+                .setValue(String(type.id));
+              const emoji = extra.skipEmoji ? null : safeEmoji(type.emoji);
+              if (emoji) option.setEmoji(emoji);
+              return option;
+            }),
+          ),
       ),
     );
   }

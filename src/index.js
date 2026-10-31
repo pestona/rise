@@ -213,7 +213,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'shop:pick') {
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('shop:')) {
       await shop.handleShopSelect(interaction);
       return;
     }

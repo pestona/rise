@@ -278,6 +278,14 @@ async function notifyShopUser(client, userId, kind, extra) {
 }
 
 async function handleShopSelect(interaction) {
+  if (interaction.customId === 'shop:rtypes') {
+    const type = findReportType(interaction.guildId, interaction.values[0]);
+    if (!type) {
+      return interaction.reply({ content: 'Этот тип отчёта уже недоступен.', flags: MessageFlags.Ephemeral });
+    }
+    return interaction.showModal(reportModal(type));
+  }
+
   const item = findItem(interaction.guildId, interaction.values[0]);
   if (!item) {
     return interaction.reply({ content: 'Этот товар уже недоступен.', flags: MessageFlags.Ephemeral });
@@ -301,7 +309,11 @@ async function handleShopSelect(interaction) {
 async function handleShopButton(interaction) {
   const action = interaction.customId.split(':')[1];
   const settings = store.getGuild(interaction.guildId);
-  creditVoicePoints(interaction.guildId, interaction.client);
+  try {
+    creditVoicePoints(interaction.guildId, interaction.client);
+  } catch (error) {
+    console.warn('Не удалось начислить голосовые баллы:', error.message);
+  }
 
   if (action === 'balance') {
     return interaction.reply({
@@ -318,11 +330,20 @@ async function handleShopButton(interaction) {
         flags: MessageFlags.Ephemeral,
       });
     }
-    return interaction.reply({
-      components: [buildShopReportCatalog(settings)],
-      flags: v2Flags(true),
-      allowedMentions: { parse: [] },
-    });
+    try {
+      return await interaction.reply({
+        components: [buildShopReportCatalog(settings)],
+        flags: v2Flags(true),
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      console.warn('Не удалось открыть каталог РП:', error.message);
+      return interaction.reply({
+        components: [buildShopReportCatalog(settings, { skipEmoji: true })],
+        flags: v2Flags(true),
+        allowedMentions: { parse: [] },
+      });
+    }
   }
 
   if (action === 'rtype') {
